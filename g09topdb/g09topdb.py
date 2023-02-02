@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import re
 from itertools import takewhile
 import os
+import logging
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
 def convert_log_pdb(dataset,FF_reference_path,targetdir):
     '''
@@ -179,7 +181,7 @@ def convert_log_pdb(dataset,FF_reference_path,targetdir):
     files = dataset.glob("*nat*.log")
     for file in files:
         seq = seq_from_filename(file,AAs_reference)
-        print(seq)
+        logging.info(f"--- Starting to convert coordinates from file {file} with sequence {seq} ---")
         trajectory = read(file,index=':')
 
         ## get formula and separation of atoms into residues ##
@@ -192,8 +194,6 @@ def convert_log_pdb(dataset,FF_reference_path,targetdir):
             AA_delim_idxs.append([pos,pos+AA_len])
             pos += AA_len
 
-        print(AA_delim_idxs)
-        print(formula)
         assert pos == len(formula) , f"Mismatch in number of atoms in {seq}:{pos} and {formula}:{len(formula)}"
 
 
@@ -202,20 +202,21 @@ def convert_log_pdb(dataset,FF_reference_path,targetdir):
         [bonds] = ana.unique_bonds
         [allbonds] = ana.all_bonds
         #allbonds = [[int(idx) for idx in bond] for bond in allbonds]
-        print(bonds)
-        print(allbonds,type(allbonds[0]),type(allbonds[0][0]))
         atom_ordering = []
         for i,AA_delim_idx in enumerate(AA_delim_idxs):
-            print(f"\n______{i+1}______")
+            logging.debug(f"\n______residue {i+1}______")
             AA_atoms = [[idx,formula[idx]] for idx in list(range(*AA_delim_idx))]
             AA_partners = [list(np.extract((np.array(bond) < AA_delim_idx[1]) & (AA_delim_idx[0] <= np.array(bond)),bond)) for bond in bonds[AA_delim_idx[0]:AA_delim_idx[1]]]
             AA_bonds = [[i+AA_delim_idx[0],partner] for i, partners in enumerate(AA_partners) for partner in partners]
-            print(AA_atoms,AA_partners,AA_bonds)
+            logging.debug(AA_atoms)
+            logging.debug(AA_partners)
+            logging.debug(AA_bonds)
 
             AA_refatoms = [[atom[0],atom[0][0]] for atom in AAs_reference[seq[i]]['atoms']]
             AA_refbonds = [bond for bond in AAs_reference[seq[i]]['bonds'] if not any(idx.startswith(('-','+')) for idx in bond)]
             #AA_refbonds = [bond for bond in AA_reference[seq[i]]['bonds']]
-            print(AA_refatoms,AA_refbonds)
+            logging.debug(AA_refatoms)
+            logging.debug(AA_refbonds)
 
             AA_AtomList = AtomList(AA_atoms,AA_bonds)
             AA_refAtomList = AtomList(AA_refatoms,AA_refbonds)
@@ -233,11 +234,12 @@ def convert_log_pdb(dataset,FF_reference_path,targetdir):
                 n2 = AA_refAtomList.get_neighbor_elements(order)
 
                 occurences = Counter(n1)
-                print(occurences,mapdict)
+                logging.debug(occurences)
+                logging.debug(mapdict)
                 for key,val in occurences.items():
                     if val == 1:
                         if AA_AtomList.atoms[n1.index(key)].idx not in mapdict.keys():
-                            print(AA_AtomList.atoms[n1.index(key)].idx,mapdict)
+                            logging.debug(AA_AtomList.atoms[n1.index(key)].idx,mapdict)
                             mapdict[AA_AtomList.atoms[n1.index(key)].idx] = AA_refAtomList.atoms[n2.index(key)].idx
 
 
@@ -245,8 +247,8 @@ def convert_log_pdb(dataset,FF_reference_path,targetdir):
             if len(mapdict.keys()) < len(AA_AtomList):
                 AA_remainder = sorted(list(set(AA_AtomList.idxs)-set(mapdict.keys())))
                 AA_refremainder = sorted(list(set(AA_refAtomList.idxs)-set(rmapdict.keys())))
-                print(f"{AA_remainder}/{AA_refremainder} remain unmatched after neighbor comparison!")
-            print(mapdict,rmapdict)
+                logging.debug(f"{AA_remainder}/{AA_refremainder} remain unmatched after neighbor comparison!")
+            logging.debug(mapdict)
 
             # try matching of indistinguishable atoms bound to the same atom that has a mapping
             for i in range(2):
@@ -262,24 +264,24 @@ def convert_log_pdb(dataset,FF_reference_path,targetdir):
                                     rmapdict[refneighbor.idx] = neighbor.idx
                                     AA_remainder.remove(neighbor.idx)
                                     AA_refremainder.remove(refneighbor.idx)
-                                    print(f"match {neighbor.idx}:{refneighbor.idx}")
+                                    logging.debug(f"match {neighbor.idx}:{refneighbor.idx}")
                                     break
                 if len(AA_remainder):
-                    print(f"{AA_remainder}/{AA_refremainder} remain unmatched checking for indistinguishable atoms")
+                    logging.info(f"{AA_remainder}/{AA_refremainder} remain unmatched; checking for indistinguishable atoms")
                 else:
-                    print(f"All atoms in were successfully matched:{mapdict}!")
+                    logging.info(f"All atoms in were successfully matched:{mapdict}!")
                     break
             if len(AA_remainder):
-                raise ValueError(f"{AA_remainder}/{AA_refremainder} remain unmatched checking for indistinguishable atoms")
+                raise ValueError(f"{AA_remainder}/{AA_refremainder} remain unmatched, cannot complete matching")
             atom_ordering.extend([rmapdict[atom[0]] for atom in AA_refatoms])
-        print(atom_ordering)
-        print('\n\n')
+        logging.debug(f"New atom order {atom_ordering}")
+        logging.debug('\n\n')
         ## write single pdb per opt step## 
         targetdir.mkdir(exist_ok=True)
     
         for i,step in enumerate(trajectory):
             outfile = targetdir / (file.stem + f"_{i}.pdb")
-            print(outfile)
+            logging.debug(outfile)
             with open(outfile,'w') as f:
                 f.write(f"COMPND    {file} step {i}\n")
                 f.write(f"AUTHOR    generated by {__file__}\n")
