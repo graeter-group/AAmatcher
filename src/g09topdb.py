@@ -7,11 +7,11 @@ from ase.io.trajectory import Trajectory
 from ase.build import molecule
 from ase.geometry.analysis import Analysis
 from pathlib import Path
-import matplotlib.pyplot as plt
-import re
 from itertools import takewhile
+import re
 import os
 import logging
+
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
 def convert_log_pdb(dataset,FF_reference_path,targetdir):
@@ -19,95 +19,6 @@ def convert_log_pdb(dataset,FF_reference_path,targetdir):
     String explaining the package
     '''
 
-    ## from kimmdy
-    def read_rtp(path: Path) -> dict:
-        # TODO: make this more elegant and performant
-        with open(path, "r") as f:
-            sections = get_sections(f, "\n")
-            d = {}
-            for i, s in enumerate(sections):
-                # skip empty sections
-                if s == [""]:
-                    continue
-                name, content = extract_section_name(s)
-                content = [c.split() for c in content if len(c.split()) > 0]
-                if not name:
-                    name = f"BLOCK {i}"
-                d[name] = create_subsections(content)
-                # d[name] = content
-
-            return d
-
-    def extract_section_name(ls):
-        """takes a list of lines and return a tuple
-        with the name and the lines minus the
-        line that contained the name.
-        Returns the empty string if no name was found.
-        """
-        for i, l in enumerate(ls):
-            if l and l[0] != ";" and "[" in l:
-                name = l.strip("[] \n")
-                ls.pop(i)
-                return (name, ls)
-        else:
-            return ("", ls)
-
-    def is_not_comment(c: str) -> bool:
-        return c != ";"
-
-    def get_sections(seq, section_marker):
-        data = [""]
-        for line in seq:
-            line = "".join(takewhile(is_not_comment, line))
-            if line.strip(" ").startswith(section_marker):
-                if data:
-                    # first element will be empty
-                    # because newlines mark sections
-                    data.pop(0)
-                    # only yield section if non-empty
-                    if len(data) > 0:
-                        yield data
-                    data = [""]
-            data.append(line.strip("\n"))
-        if data:
-            yield data
-
-    def create_subsections(ls):
-        d = {}
-        subsection_name = "other"
-        for i, l in enumerate(ls):
-            if l[0] == "[":
-                subsection_name = l[1]
-            else:
-                if subsection_name not in d:
-                    d[subsection_name] = []
-                d[subsection_name].append(l)
-
-        return d
-    ##
-
-    def get_str_chars(string,indices):
-        return ''.join(sorted([string[x] for x in indices]))
-
-    def seq_from_filename(filename : Path, FF_refdict, cap = True):
-        components = filename.stem.split(sep='_')
-        seq = []
-        seq.append(components[0].upper() if components[1] == 'nat' else components[0].upper() + '_R')
-
-        if cap:
-            if len(components[0]) == 3:
-                seq.insert(0,'ACE')
-                seq.append('NME')
-            elif components[0][1:].upper() in FF_refdict.keys():
-                if components[0].startswith('N'):
-                    seq.append('NME')
-                elif components[0].startswith('C'):
-                    seq.insert(0,'ACE')
-                else:
-                    raise ValueError(f"Invalid filename {filename} for sequence conversion!")
-            else:
-                raise ValueError(f"Invalid filename {filename} for sequence conversion!")
-        return seq
 
 
 
@@ -303,4 +214,94 @@ if __name__ == "__main__":
     FF_reference_path = Path("../example/amber99sb-star-ildnp.ff/aminoacids.rtp")
     targetdir = Path("../tmp")
     convert_log_pdb(dataset,FF_reference_path,targetdir)
-        
+
+
+## utils (from kimmdy) ##
+def read_rtp(path: Path) -> dict:
+    # TODO: make this more elegant and performant
+    with open(path, "r") as f:
+        sections = get_sections(f, "\n")
+        d = {}
+        for i, s in enumerate(sections):
+            # skip empty sections
+            if s == [""]:
+                continue
+            name, content = extract_section_name(s)
+            content = [c.split() for c in content if len(c.split()) > 0]
+            if not name:
+                name = f"BLOCK {i}"
+            d[name] = create_subsections(content)
+            # d[name] = content
+
+        return d
+
+def extract_section_name(ls):
+    """takes a list of lines and return a tuple
+    with the name and the lines minus the
+    line that contained the name.
+    Returns the empty string if no name was found.
+    """
+    for i, l in enumerate(ls):
+        if l and l[0] != ";" and "[" in l:
+            name = l.strip("[] \n")
+            ls.pop(i)
+            return (name, ls)
+    else:
+        return ("", ls)
+
+def is_not_comment(c: str) -> bool:
+    return c != ";"
+
+def get_sections(seq, section_marker):
+    data = [""]
+    for line in seq:
+        line = "".join(takewhile(is_not_comment, line))
+        if line.strip(" ").startswith(section_marker):
+            if data:
+                # first element will be empty
+                # because newlines mark sections
+                data.pop(0)
+                # only yield section if non-empty
+                if len(data) > 0:
+                    yield data
+                data = [""]
+        data.append(line.strip("\n"))
+    if data:
+        yield data
+
+def create_subsections(ls):
+    d = {}
+    subsection_name = "other"
+    for i, l in enumerate(ls):
+        if l[0] == "[":
+            subsection_name = l[1]
+        else:
+            if subsection_name not in d:
+                d[subsection_name] = []
+            d[subsection_name].append(l)
+
+    return d
+##
+
+def get_str_chars(string,indices):
+    return ''.join(sorted([string[x] for x in indices]))
+
+def seq_from_filename(filename : Path, FF_refdict, cap = True):
+    components = filename.stem.split(sep='_')
+    seq = []
+    seq.append(components[0].upper() if components[1] == 'nat' else components[0].upper() + '_R')
+
+    if cap:
+        if len(components[0]) == 3:
+            seq.insert(0,'ACE')
+            seq.append('NME')
+        elif components[0][1:].upper() in FF_refdict.keys():
+            if components[0].startswith('N'):
+                seq.append('NME')
+            elif components[0].startswith('C'):
+                seq.insert(0,'ACE')
+            else:
+                raise ValueError(f"Invalid filename {filename} for sequence conversion!")
+        else:
+            raise ValueError(f"Invalid filename {filename} for sequence conversion!")
+    return seq        
