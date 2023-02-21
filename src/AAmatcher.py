@@ -295,7 +295,7 @@ class AtomList:
         return len(self.atoms)
     
     def __repr__(self):
-        return f"g09topdb.AtomList object with {len(self.atoms)} atoms and {len(self.bonds)} bonds"
+        return f"AAmatcher.AtomList object with {len(self.atoms)} atoms and {len(self.bonds)} bonds"
 
 ## general utils ##
 def _create_molref(AAs_reference: dict, sequence: list):
