@@ -11,6 +11,9 @@ import logging
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
 def seq_from_filename(filename : Path, FF_refdict, cap = True):
+    '''
+    String that explains this function
+    '''    
     components = filename.stem.split(sep='_')
     seq = []
     seq.append(components[0].upper() if components[1] == 'nat' else components[0].upper() + '_R')
@@ -31,63 +34,49 @@ def seq_from_filename(filename : Path, FF_refdict, cap = True):
     return seq 
 
 
-def create_molref(AAs_reference: dict, sequence: list):
-    mol_ref = []
-    for res in sequence:
-        AA_refatoms = [[atom[0],atom[0][0]] for atom in AAs_reference[res]['atoms']]
-        AA_refbonds = [bond for bond in AAs_reference[res]['bonds'] if not any(idx.startswith(('-','+')) for idx in bond)]
-        AA_refAtomList = AtomList(AA_refatoms,AA_refbonds)
-        mol_ref.append(AA_refAtomList)
-    return mol_ref
-
 def read_g09(file: Path, sequence: str, FF_rtp: Path):
-    logging.info(f"--- Starting to readcoordinates from file {file} with sequence {sequence} ---")
+    '''
+    String that explains this function
+    '''
+
+    logging.info(f"--- Starting to readc oordinates from file {file} with sequence {sequence} ---")
     trajectory = read(file,index=':')
     AAs_reference = read_rtp(FF_rtp)
-
-
 
     ## get formula and separation of atoms into residues ##
     formula = trajectory[-1].get_chemical_formula(mode='all')
     AA_delim_idxs = []              # index of first atom in new residue
     pos = 0
+
     # this assignment of AA_delim_idx assumes the atoms to be ordered by residues
     for AA in sequence:
         AA_len = len(AAs_reference[AA]['atoms'])
         AA_delim_idxs.append([pos,pos+AA_len])
         pos += AA_len
-
     assert pos == len(formula) , f"Mismatch in number of atoms in {sequence}:{pos} and {formula}:{len(formula)}"
-        ## split molecule into residues and get list of bonds. reconstruct atomnames using list ##
+
+    ## split molecule into residues and get list of bonds. reconstruct atomnames using list ##
     ana = Analysis(trajectory[-1])
     [bonds] = ana.unique_bonds
-
     
     res_AtomLists = []
     for _,AA_delim_idx in enumerate(AA_delim_idxs):
-
         AA_atoms = [[idx,formula[idx]] for idx in list(range(*AA_delim_idx))]
         AA_partners = [list(np.extract((np.array(bond) < AA_delim_idx[1]) & (AA_delim_idx[0] <= np.array(bond)),bond)) for bond in bonds[AA_delim_idx[0]:AA_delim_idx[1]]]
         AA_bonds = [[i+AA_delim_idx[0],partner] for i, partners in enumerate(AA_partners) for partner in partners]
 
-
-
-        #logging.debug(AA_refatoms)
-        #logging.debug(AA_refbonds)
-
-        AA_AtomList = AtomList(AA_atoms,AA_bonds)
-        res_AtomLists.append(AA_AtomList)
-
+        res_AtomLists.append(AtomList(AA_atoms,AA_bonds))
 
     return res_AtomLists, trajectory
 
 def match_mol(mol: list, AAs_reference: dir, seq: list):
     '''
-    String explaining the package
+    String that explains this function
     '''
 
-    # get mol_ref from function here
-    mol_ref = create_molref(AAs_reference, seq)
+    logging.info(f"--- Matching molecule with sequence {seq} to reference ---")
+    ## get mol_ref from function here
+    mol_ref = _create_molref(AAs_reference, seq)
     logging.info(f"created reference: {mol_ref}")
 
     atom_order = []
@@ -102,7 +91,7 @@ def match_mol(mol: list, AAs_reference: dir, seq: list):
         # assume both graphs are isomorphic after this assert
 
         mapdict = {}
-        # try simple matching by neighbor elements
+        # #try simple matching by neighbor elements
         for order in range(4):
             n1 = AL.get_neighbor_elements(order)
             n2 = AL_ref.get_neighbor_elements(order)
@@ -116,7 +105,6 @@ def match_mol(mol: list, AAs_reference: dir, seq: list):
                         logging.debug(AL.atoms[n1.index(key)].idx,mapdict)
                         mapdict[AL.atoms[n1.index(key)].idx] = AL_ref.atoms[n2.index(key)].idx
 
-
         rmapdict = dict(map(reversed, mapdict.items()))
         if len(mapdict.keys()) < len(AL):
             AA_remainder = sorted(list(set(AL.idxs)-set(mapdict.keys())))
@@ -124,7 +112,7 @@ def match_mol(mol: list, AAs_reference: dir, seq: list):
             logging.debug(f"{AA_remainder}/{AA_refremainder} remain unmatched after neighbor comparison!")
         logging.debug(mapdict)
 
-        # try matching of indistinguishable atoms bound to the same atom that has a mapping
+        ## try matching of indistinguishable atoms bound to the same atom that has a mapping
         for _ in range(2):
             AA_match = list(mapdict.keys())
             for atom_idx in AA_match:
@@ -148,6 +136,7 @@ def match_mol(mol: list, AAs_reference: dir, seq: list):
                 break
         if len(AA_remainder):
             raise ValueError(f"{AA_remainder}/{AA_refremainder} remain unmatched, cannot complete matching")
+ 
         logging.debug(mol_ref[i].idxs)
         logging.debug(rmapdict)
         atom_order.extend([rmapdict[atom] for atom in mol_ref[i].idxs])
@@ -156,9 +145,14 @@ def match_mol(mol: list, AAs_reference: dir, seq: list):
     return atom_order
 
 def write_trjtopdb(outfile: Path, trajectory, atom_order: list, seq: list, AAs_reference: dir):
-    ## write single pdb per opt step## 
+    '''
+    String that explains this function
+    '''
+
+    logging.info(f"--- Writing Trajectory of molecule with sequence {seq} to PDBs ---")
     outfile.parent.mkdir(exist_ok=True)
 
+    ## write single pdb per opt step## 
     for i,step in enumerate(trajectory):
         writefile = outfile.parent / f"{outfile.stem}_{i}.pdb"
         with open(writefile,'w') as f:
@@ -174,6 +168,9 @@ def write_trjtopdb(outfile: Path, trajectory, atom_order: list, seq: list, AAs_r
                 atomname = AAs_reference[seq[AA_pos]]['atoms'][j-res_len][0]
                 f.write('{0}  {1:>5d} {2:^4s} {3:<3s} {4:1s}{5:>4d}    {6:8.3f}{7:8.3f}{8:8.3f}{9:6.2f}{10:6.2f}          {11:>2s}\n'.format('ATOM',j,atomname ,seq[AA_pos],'A',AA_pos+1,*step.positions[k],1.00,0.00,atomname[0]))
             f.write("END")
+    return
+
+
 
 if __name__ == "__main__":
     dname = os.path.dirname(os.path.abspath(__file__))
@@ -265,26 +262,36 @@ class AtomList:
     def __repr__(self):
         return f"g09topdb.AtomList object with {len(self.atoms)} atoms and {len(self.bonds)} bonds"
 
+## general utils ##
+def _create_molref(AAs_reference: dict, sequence: list):
+    mol_ref = []
+    for res in sequence:
+        AA_refatoms = [[atom[0],atom[0][0]] for atom in AAs_reference[res]['atoms']]
+        AA_refbonds = [bond for bond in AAs_reference[res]['bonds'] if not any(idx.startswith(('-','+')) for idx in bond)]
+        AA_refAtomList = AtomList(AA_refatoms,AA_refbonds)
+        mol_ref.append(AA_refAtomList)
+    return mol_ref
+
 ## utils (from kimmdy) ##
 def read_rtp(path: Path) -> dict:
     # TODO: make this more elegant and performant
     with open(path, "r") as f:
-        sections = get_sections(f, "\n")
+        sections = _get_sections(f, "\n")
         d = {}
         for i, s in enumerate(sections):
             # skip empty sections
             if s == [""]:
                 continue
-            name, content = extract_section_name(s)
+            name, content = _extract_section_name(s)
             content = [c.split() for c in content if len(c.split()) > 0]
             if not name:
                 name = f"BLOCK {i}"
-            d[name] = create_subsections(content)
+            d[name] = _create_subsections(content)
             # d[name] = content
 
         return d
 
-def extract_section_name(ls):
+def _extract_section_name(ls):
     """takes a list of lines and return a tuple
     with the name and the lines minus the
     line that contained the name.
@@ -298,13 +305,13 @@ def extract_section_name(ls):
     else:
         return ("", ls)
 
-def is_not_comment(c: str) -> bool:
+def _is_not_comment(c: str) -> bool:
     return c != ";"
 
-def get_sections(seq, section_marker):
+def _get_sections(seq, section_marker):
     data = [""]
     for line in seq:
-        line = "".join(takewhile(is_not_comment, line))
+        line = "".join(takewhile(_is_not_comment, line))
         if line.strip(" ").startswith(section_marker):
             if data:
                 # first element will be empty
@@ -318,7 +325,7 @@ def get_sections(seq, section_marker):
     if data:
         yield data
 
-def create_subsections(ls):
+def _create_subsections(ls):
     d = {}
     subsection_name = "other"
     for i, l in enumerate(ls):
@@ -332,7 +339,5 @@ def create_subsections(ls):
     return d
 ##
 
-def get_str_chars(string,indices):
-    return ''.join(sorted([string[x] for x in indices]))
 
        
