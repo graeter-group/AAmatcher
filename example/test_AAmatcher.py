@@ -1,13 +1,13 @@
 import os
 from pathlib import Path
 
-from g09topdb import read_rtp, seq_from_filename, generate_radical_reference,read_g09, match_mol, write_trjtopdb
+from AAmatcher import read_rtp, seq_from_filename, generate_radical_reference,read_g09, match_mol, write_trjtopdb
 
 print(os.getcwd())
 
-dataset = Path("sw/g09-to-pdb/example/")
-FF_rtp = Path("sw/g09-to-pdb/example/amber99sb-star-ildnp.ff/aminoacids.rtp")
-targetdir = Path("workdir/scripts/test_g09topdb")
+dataset = Path("sw/AAmatcher/example/")
+FF_rtp = Path("sw/AAmatcher/example/amber99sb-star-ildnp.ff/aminoacids.rtp")
+targetdir = Path("workdir/scripts/test_AAmatcher")
 
 AAs_reference = read_rtp(FF_rtp)
 filenames = dataset.glob("*rad*.log")
