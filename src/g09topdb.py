@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections import Counter
 import numpy as np
+import copy
 from ase.io import read
 from ase.geometry.analysis import Analysis
 from pathlib import Path
@@ -33,21 +34,49 @@ def seq_from_filename(filename : Path, FF_refdict, cap = True):
             raise ValueError(f"Invalid filename {filename} for sequence conversion!")
     return seq 
 
+def generate_radical_reference(AAs_reference: dict, AA: str, heavy_name: str):
+    '''
+    String that explains this function
+    Assumes a hydrogen was abstracted from the radical atom
+    '''
+    logging.info(f"--- Generating radical reference entry for residue {AA} with a {heavy_name} radical ---")
+    ## search for hydrogen attached to radical
+    for bond in AAs_reference[AA]['bonds'][::-1]:
+        bond_atoms = bond
+        if heavy_name in bond_atoms:
+            heavy_partner = bond_atoms[0] if heavy_name == bond_atoms[1] else bond_atoms[1]
+            # assumes that it does not matter which hydrogen was abstracted
+            if heavy_partner.startswith('H'):
+                rmv_H = heavy_partner
+                break
 
-def read_g09(file: Path, sequence: str, FF_rtp: Path):
+    AAs_reference[AA + '_R'] = copy.deepcopy(AAs_reference[AA])
+    for atom in AAs_reference[AA + '_R']['atoms']:
+        if rmv_H == atom[0]:
+            rmv_atom = atom
+            break
+    for bond in AAs_reference[AA + '_R']['bonds']:
+        if rmv_H in bond:
+            rmv_bond = bond
+            break
+    AAs_reference[AA + '_R']['atoms'].remove(rmv_atom)
+    AAs_reference[AA + '_R']['bonds'].remove(rmv_bond)
+    return AAs_reference
+
+
+def read_g09(file: Path, sequence: str, AAs_reference: dict):
     '''
     String that explains this function
     '''
 
     logging.info(f"--- Starting to readc oordinates from file {file} with sequence {sequence} ---")
     trajectory = read(file,index=':')
-    AAs_reference = read_rtp(FF_rtp)
 
     ## get formula and separation of atoms into residues ##
     formula = trajectory[-1].get_chemical_formula(mode='all')
-    AA_delim_idxs = []              # index of first atom in new residue
-    pos = 0
 
+    AA_delim_idxs = []              # index of first atom in new residue   
+    pos = 0
     # this assignment of AA_delim_idx assumes the atoms to be ordered by residues
     for AA in sequence:
         AA_len = len(AAs_reference[AA]['atoms'])
@@ -69,7 +98,7 @@ def read_g09(file: Path, sequence: str, FF_rtp: Path):
 
     return res_AtomLists, trajectory
 
-def match_mol(mol: list, AAs_reference: dir, seq: list):
+def match_mol(mol: list, AAs_reference: dict, seq: list):
     '''
     String that explains this function
     '''
@@ -144,7 +173,7 @@ def match_mol(mol: list, AAs_reference: dir, seq: list):
         logging.debug('\n\n')
     return atom_order
 
-def write_trjtopdb(outfile: Path, trajectory, atom_order: list, seq: list, AAs_reference: dir):
+def write_trjtopdb(outfile: Path, trajectory, atom_order: list, seq: list, AAs_reference: dict):
     '''
     String that explains this function
     '''
@@ -166,7 +195,7 @@ def write_trjtopdb(outfile: Path, trajectory, atom_order: list, seq: list, AAs_r
                     AA_pos += 1
                     res_len += len(AAs_reference[seq[AA_pos]]['atoms'])
                 atomname = AAs_reference[seq[AA_pos]]['atoms'][j-res_len][0]
-                f.write('{0}  {1:>5d} {2:^4s} {3:<3s} {4:1s}{5:>4d}    {6:8.3f}{7:8.3f}{8:8.3f}{9:6.2f}{10:6.2f}          {11:>2s}\n'.format('ATOM',j,atomname ,seq[AA_pos],'A',AA_pos+1,*step.positions[k],1.00,0.00,atomname[0]))
+                f.write('{0}  {1:>5d} {2:^4s} {3:<3s} {4:1s}{5:>4d}    {6:8.3f}{7:8.3f}{8:8.3f}{9:6.2f}{10:6.2f}          {11:>2s}\n'.format('ATOM',j,atomname ,seq[AA_pos].split(sep="_")[0],'A',AA_pos+1,*step.positions[k],1.00,0.00,atomname[0]))
             f.write("END")
     return
 
