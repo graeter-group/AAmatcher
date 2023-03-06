@@ -243,8 +243,17 @@ class Atom:
 
         elements = ''.join(sorted([neighbor.element for neighbor in curr_neighbors]))
 
+    def get_neighbor_idxs(self,order):
+        curr_neighbors = [self]
+        for _ in range(order):
+            prev_neighbors = curr_neighbors
+            curr_neighbors = []
+            for neighbor in prev_neighbors:
+                curr_neighbors.extend(neighbor.neighbors)
 
-        return elements
+        idxs = ''.join(sorted([neighbor.idx for neighbor in curr_neighbors]))
+
+        return idxs
 
 class AtomList:
     def __init__(self,atoms,bonds):
