@@ -251,7 +251,7 @@ class Atom:
             for neighbor in prev_neighbors:
                 curr_neighbors.extend(neighbor.neighbors)
 
-        return curr_neighbors
+        return [x.idx for x in curr_neighbors]
 
 class AtomList:
     def __init__(self,atoms,bonds):
