@@ -5,16 +5,18 @@ import copy
 from ase.io import read
 from ase.geometry.analysis import Analysis
 from pathlib import Path
-from itertools import takewhile
 import os
 import logging
 from ase.calculators.calculator import PropertyNotImplementedError
 
+from utils import *
+from representation import Atom, AtomList
+
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
-def seq_from_filename(filename : Path, FF_refdict, cap = True):
+def seq_from_filename(filename : Path, AAs_reference=None, cap = True):
     '''
-    String that explains this function
+    Returns a list of strings describing a sequence found in a filename.
     '''    
     components = filename.stem.split(sep='_')
     seq = []
@@ -24,13 +26,14 @@ def seq_from_filename(filename : Path, FF_refdict, cap = True):
         if len(components[0]) == 3:
             seq.insert(0,'ACE')
             seq.append('NME')
-        elif components[0][1:].upper() in FF_refdict.keys():
-            if components[0].startswith('N'):
-                seq.append('NME')
-            elif components[0].startswith('C'):
-                seq.insert(0,'ACE')
-            else:
-                raise ValueError(f"Invalid filename {filename} for sequence conversion!")
+        elif not AAs_reference is None:
+            if components[0][1:].upper() in AAs_reference.keys():
+                if components[0].startswith('N'):
+                    seq.append('NME')
+                elif components[0].startswith('C'):
+                    seq.insert(0,'ACE')
+                else:
+                    raise ValueError(f"Invalid filename {filename} for sequence conversion!")
         else:
             raise ValueError(f"Invalid filename {filename} for sequence conversion!")
     return seq 
@@ -67,7 +70,8 @@ def generate_radical_reference(AAs_reference: dict, AA: str, heavy_name: str):
 
 def read_g09(file: Path, sequence: str, AAs_reference: dict):
     '''
-    String that explains this function
+    Returns a mol and an ASE trajectory.
+    THIS ASSUMES THAT THE ATOMS ARE ORDERED BY RESIDUE!
     '''
 
     logging.info(f"--- Starting to read coordinates from file {file} with sequence {sequence} ---")
@@ -206,105 +210,10 @@ def write_trjtopdb(outfile: Path, trajectory, atom_order: list, seq: list, AAs_r
     return
 
 
-
-if __name__ == "__main__":
-    dname = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(dname)
-
-    dataset = Path("../example")
-    FF_reference_path = Path("../example/amber99sb-star-ildnp.ff/aminoacids.rtp")
-    targetdir = Path("../tmp")
-    match_mol(dataset,FF_reference_path,targetdir)
-
-
-
-
-
-
-
-
-## classes ##
-class Atom:
-    def __init__(self,idx,element):
-        self.idx = idx
-        self.element = element
-        self.neighbors = []
-
-    def add_neighbors(self, neighbors: list(Atom)):
-        self.neighbors.extend(neighbors)
-
-    def get_neighbor_elements(self,order):
-        curr_neighbors = [self]
-        for _ in range(order):
-            prev_neighbors = curr_neighbors
-            curr_neighbors = []
-            for neighbor in prev_neighbors:
-                curr_neighbors.extend(neighbor.neighbors)
-
-        elements = ''.join(sorted([neighbor.element for neighbor in curr_neighbors]))
-
-    def get_neighbor_idxs(self,order):
-        curr_neighbors = [self]
-        for _ in range(order):
-            prev_neighbors = curr_neighbors
-            curr_neighbors = []
-            for neighbor in prev_neighbors:
-                curr_neighbors.extend(neighbor.neighbors)
-
-        return [x.idx for x in curr_neighbors]
-
-class AtomList:
-    def __init__(self,atoms,bonds):
-        self.idxs: list = []
-        self.elements = []
-        self.atoms: list[Atom] = []
-        self.bonds = []
-
-        for atom in atoms:
-            self.atoms.append(Atom(*atom))
-
-        self.set_indices()
-        self.set_elements()
-
-        for bond in bonds:
-            self.atoms[self.idxs.index(bond[0])].add_neighbors([self.atoms[self.idxs.index(bond[1])]])
-            self.atoms[self.idxs.index(bond[1])].add_neighbors([self.atoms[self.idxs.index(bond[0])]])
-
-        self.set_bonds()
-
-    def set_indices(self):
-        self.idxs: list = []
-        for atom in self.atoms:
-            self.idxs.append(atom.idx)
-
-    def set_elements(self):
-        self.elements = []
-        for atom in self.atoms:
-            self.elements.append(atom.element)
-
-    def set_bonds(self):
-        self.bonds: list = []
-        for atom in self.atoms:
-            for neighbor in atom.neighbors:
-                self.bonds.append([atom,neighbor])
-
-
-    def get_neighbor_elements(self,order):
-        elements = []
-        for atom in self.atoms:
-            elements.append(atom.get_neighbor_elements(order))
-        return elements
-
-    def by_idx(self,idx):
-        return self.atoms[self.idxs.index(idx)]
-        
-    def __len__(self):
-        return len(self.atoms)
-    
-    def __repr__(self):
-        return f"AAmatcher.AtomList object with {len(self.atoms)} atoms and {len(self.bonds)} bonds"
-
 ## general utils ##
+'''
+Construct a molecule, i.e. List of AtomLists, from whatr the force field expecs the residues to look like. 
+'''
 def _create_molref(AAs_reference: dict, sequence: list):
     mol_ref = []
     for res in sequence:
@@ -314,72 +223,12 @@ def _create_molref(AAs_reference: dict, sequence: list):
         mol_ref.append(AA_refAtomList)
     return mol_ref
 
-## utils (from kimmdy) ##
-def read_rtp(path: Path) -> dict:
-    # TODO: make this more elegant and performant
-    with open(path, "r") as f:
-        sections = _get_sections(f, "\n")
-        d = {}
-        for i, s in enumerate(sections):
-            # skip empty sections
-            if s == [""]:
-                continue
-            name, content = _extract_section_name(s)
-            content = [c.split() for c in content if len(c.split()) > 0]
-            if not name:
-                name = f"BLOCK {i}"
-            d[name] = _create_subsections(content)
-            # d[name] = content
 
-        return d
+if __name__ == "__main__":
+    dname = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(dname)
 
-def _extract_section_name(ls):
-    """takes a list of lines and return a tuple
-    with the name and the lines minus the
-    line that contained the name.
-    Returns the empty string if no name was found.
-    """
-    for i, l in enumerate(ls):
-        if l and l[0] != ";" and "[" in l:
-            name = l.strip("[] \n")
-            ls.pop(i)
-            return (name, ls)
-    else:
-        return ("", ls)
-
-def _is_not_comment(c: str) -> bool:
-    return c != ";"
-
-def _get_sections(seq, section_marker):
-    data = [""]
-    for line in seq:
-        line = "".join(takewhile(_is_not_comment, line))
-        if line.strip(" ").startswith(section_marker):
-            if data:
-                # first element will be empty
-                # because newlines mark sections
-                data.pop(0)
-                # only yield section if non-empty
-                if len(data) > 0:
-                    yield data
-                data = [""]
-        data.append(line.strip("\n"))
-    if data:
-        yield data
-
-def _create_subsections(ls):
-    d = {}
-    subsection_name = "other"
-    for i, l in enumerate(ls):
-        if l[0] == "[":
-            subsection_name = l[1]
-        else:
-            if subsection_name not in d:
-                d[subsection_name] = []
-            d[subsection_name].append(l)
-
-    return d
-##
-
-
-       
+    dataset = Path("../example/g09_dataset")
+    FF_reference_path = Path("../example/amber99sb-star-ildnp.ff/aminoacids.rtp")
+    targetdir = Path("../tmp")
+    match_mol(dataset,FF_reference_path,targetdir)
