@@ -63,7 +63,8 @@ PDBMolecule.from_gaussian_log(logfile, cap:bool=True, rtp_path=DEFAULT_RTP, sequ
 
 PDBMolecule.from_xyz(cls, xyz:np.ndarray, elements:np.ndarray, energies:np.ndarray=None, gradients:np.ndarray=None, rtp_path=DEFAULT_RTP, residues:list=None, res_numbers:list=None):
     Use an xyz array of shape (N_confsxN_atomsx3) and an element array of shape (N_atoms) for initialization. The atom order in which xyz and element are stored may differ from that of those used for initilization (See description of the xyz member).
-    Currently only works for peptides that do not contain HIS or GLU
+    The positions must be given in angstrom.
+    Currently only works for peptides that do not contain HIS, GLU, PRO, PHE.
 '''
 
 class PDBMolecule:
@@ -241,7 +242,7 @@ class PDBMolecule:
         return obj
 
     @classmethod
-    def from_xyz(cls, xyz:np.ndarray, elements:np.ndarray, energies:np.ndarray=None, gradients:np.ndarray=None, rtp_path=None, residues:list=None, res_numbers:list=None, logging:bool=False):
+    def from_xyz(cls, xyz:np.ndarray, elements:np.ndarray, energies:np.ndarray=None, gradients:np.ndarray=None, rtp_path=None, residues:list=None, res_numbers:list=None, logging:bool=False, debug:bool=False):
 
         for l, to_be_checked, name in [(1,energies, "energies"), (3,gradients,"gradients")]:
             if not to_be_checked is None:
@@ -253,7 +254,6 @@ class PDBMolecule:
         if not gradients is None:
             if xyz.shape != gradients.shape:
                 raise RuntimeError(f"Gradients and positions must have the same shape. Shapes are {gradients.shape} and {xyz.shape}.")
-            
         
 
         if rtp_path is None:
@@ -265,7 +265,7 @@ class PDBMolecule:
         
         # get the residues:
         if residues is None or res_numbers is None:
-            residues, res_numbers = xyz2res(xyz[0], elements)
+            residues, res_numbers = xyz2res(xyz[0], elements, debug=debug)
 
         # find a permutation that orders the residues:
         l = [(res_numbers[i], i) for i in range(len(res_numbers))]

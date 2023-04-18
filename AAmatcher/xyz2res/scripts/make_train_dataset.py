@@ -14,11 +14,6 @@ from AAmatcher.xyz2res.constants import MAX_ELEMENT, RESIDUES
 POS_UNIT = angstrom
 
 
-# in: graph with elements
-# out: graph with elements and residue
-
-# next model: instance segmentation on this
-
 class BondMismatch(Exception):
     pass
 
@@ -27,13 +22,14 @@ class NodeMismatch(Exception):
 
 if __name__=="__main__":
 
-    DS = "pep2"
+    DS = "/hits/fast/mbm/seutelf/data/raw_pdb_files"
 
     graphs = []
     labels = []
 
     # %%
     counter = 0
+    counter
     errors = []
     err_types = []
     err_res = dict.fromkeys(RESIDUES)
@@ -41,6 +37,7 @@ if __name__=="__main__":
         err_res[k] = 0
 
     for filename in Path(DS).rglob('*.pdb'):
+        print(counter, end="\r")
         counter += 1
         try:
             labels.append(str(filename))
@@ -127,9 +124,9 @@ if __name__=="__main__":
     print(f"successful for {len(graphs)} out of {counter} molecules.")
     #%%
 
-    dspath = str(Path('tmp')/Path(DS+'.bin'))
+    dspath = str(Path('tmp')/Path("pdb_ds"+'.bin'))
     dgl.data.utils.save_graphs(dspath, graphs)
 
-    with open(str(Path('tmp')/Path(DS+'_files.json')), "w") as f:
+    with open(str(Path('tmp')/Path("pdb_ds"+'_files.json')), "w") as f:
         json.dump(labels, f)
     # %%

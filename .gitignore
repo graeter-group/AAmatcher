@@ -52,4 +52,4 @@ docs/_build/
 tmp/
 *.npz
 
-AAmatcher/xyz2res/pep2
+AAmatcher/xyz2res/ds

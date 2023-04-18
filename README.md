@@ -5,6 +5,8 @@ Provides a class, PDBMolecule, to store and convert datasets (positions, energie
 
 The class can also be used to create PDB files from xyz coordinates and elements alone. See examples/from_xyz.py for an instructive tutorial.
 
+Currently, residue prediction is not possible for HIS, GLY, PHE, PRO and not guaranteed to work for molecules larger than dipeptides.
+
 ## Installation
 - `git clone https://github.com/hits-mbm-dev/AAmatcher.git`
 - `git checkout version-0.0.2`

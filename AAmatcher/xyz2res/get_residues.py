@@ -13,11 +13,12 @@ if os.path.exists(hash_storage):
 #%%
 
 def get_residue(subgraph):
+
     elems = torch.argmax(subgraph.ndata["atomic_number"], dim=-1)
     # just take the square because it works as opposed to the sum
     res_hash = (elems*elems).sum().item()
     if not str(res_hash) in hashed_residues.keys():
-        raise RuntimeError(f"Found a subgraph of length {len(elems)} that does not match any residue. Elements are: \n{elems}")
+        raise RuntimeError(f"Found a subgraph of length {len(elems)} that does not match any residue. Elements are: \n{elems}\nThe model predicts that the subgraph contains {subgraph.ndata['c_alpha'].sum().item()} c alpha atoms")
     res = hashed_residues[str(res_hash)]
 
     # these have the same elements, differentiate further:
@@ -27,7 +28,10 @@ def get_residue(subgraph):
 
 # only to be called if it is safe that the residue is either leu or ile
 def classify_leu(subgraph):
-    ca = torch.argwhere(subgraph.ndata["c_alpha"]).flatten().item()
+    ca = torch.argwhere(subgraph.ndata["c_alpha"]!=0)[:,0].int().tolist()
+
+    assert len(ca) == 1 , f"found invalid number of c alphas. c alphas are: {ca}"
+    ca = ca[0]
     # get the carbon atom that comes next in the residue
     for m in subgraph.predecessors(ca):
         neighbor_elems = torch.argmax(subgraph.ndata["atomic_number"], dim=-1)[subgraph.predecessors(m).long()].tolist()
@@ -66,6 +70,7 @@ def write_residues(g, get_residue=get_residue):
         neighbors = g.predecessors(n).tolist()
         N_remove = None
         C_remove = None
+        CO = None
         for m in neighbors:
             # remove the C from the CO of the other residue
             if elems[m].item() == 7:
@@ -86,6 +91,8 @@ def write_residues(g, get_residue=get_residue):
                             CO = m
                             break
 
+        if CO is None:
+            raise RuntimeError("connectivity or the predicted c alphas are wrong, the backbone structure cannot be found")
         for i in g.predecessors(CO).tolist():
             if elems[i].item() == 7:
                 # we are at the target N
@@ -93,10 +100,10 @@ def write_residues(g, get_residue=get_residue):
                 break
 
         if N_remove is None:
-            raise RuntimeError("could not infer N_remove")
+            raise RuntimeError("connectivity or the predicted c alphas are wrong, the backbone structure cannot be found")
         
         if C_remove is None:
-            raise RuntimeError("could not infer C_remove")
+            raise RuntimeError("connectivity or the predicted c alphas are wrong, the backbone structure cannot be found")
 
         # store node ids in g
         cutted_g = g
