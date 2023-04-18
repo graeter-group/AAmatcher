@@ -50,3 +50,6 @@ docs/_build/
 
 # Temporary files:
 tmp/
+*.npz
+
+AAmatcher/xyz2res/pep2
