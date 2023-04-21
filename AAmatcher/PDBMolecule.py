@@ -113,7 +113,7 @@ class PDBMolecule:
         return len(self.xyz)
 
     """
-    Internal helper function
+    Create a dictionary holding arrays of the internal data.
     """
     def to_dict(self):
         arrays = {}
@@ -171,12 +171,6 @@ class PDBMolecule:
     Returns an ASE trajectory of the states given by idxs. Default is to return a trajectory containing all states.
     """
     def to_ase(self, idxs=None):
-        pass
-
-    """
-    Returns a heterogeneous dgl graph containing the connectivity of the pdb and positions, energies and gradients stored in the respective node types of the states given by idxs. Default is to store all states.
-    """
-    def to_dgl(self, idx=None):
         pass
 
 
@@ -274,6 +268,8 @@ class PDBMolecule:
 
         xyz = xyz[:,perm]
         elements = elements[perm]
+        if not gradients is None:
+            gradients = gradients[:,perm]
 
         if not energies is None:
             obj.energies = energies

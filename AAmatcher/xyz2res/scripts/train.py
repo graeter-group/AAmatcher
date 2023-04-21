@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     model = Representation(256,out_feats=1,n_residuals=2,n_conv=1)
 
-    graphs, _ = load_graphs("./tmp/pep2.bin")
+    graphs, _ = load_graphs("./tmp/pdb_ds.bin")
 
     loss_fn = torch.nn.BCEWithLogitsLoss()
     optim = torch.optim.Adam(model.parameters(), lr=1e-5)
@@ -56,5 +56,5 @@ if __name__ == "__main__":
     # %%
     model.eval()
     model = model.to("cpu")
-    torch.save(model.state_dict(), Path(__file__).parent.parent / Path("model.pt"))
+    torch.save(model.state_dict(), Path(__file__).parent.parent / Path("model2.pt"))
     # %%

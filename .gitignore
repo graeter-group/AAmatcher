@@ -53,3 +53,5 @@ tmp/
 *.npz
 
 AAmatcher/xyz2res/ds
+
+*.code-workspace
