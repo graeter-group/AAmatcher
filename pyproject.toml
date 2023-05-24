@@ -4,11 +4,14 @@ requires = ["setuptools"
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "AAmatcher"
-version = "1.0.0"
+name = "PDBData"
+version = "0.1.0"
 dependencies = [
     "numpy",
     "ase",
+    "dgl",
+    "torch",
+    "openmm"
 ]
 
 [tool.setuptools]
@@ -18,3 +21,4 @@ include-package-data = true
 # You can deactivate that with `include-package-data = false`
 
 [tool.setuptools.packages.find]
+where=["src"]
