@@ -18,7 +18,13 @@ def seq_from_filename(filename : Path, FF_refdict, cap = True):
     '''    
     components = filename.stem.split(sep='_')
     seq = []
-    seq.append(components[0].upper() if components[1] == 'nat' else components[0].upper() + '_R')
+    if not any([components[1][:3] in ['Ace','Nme']]):
+        seq.append(components[0].upper() if components[1] == 'nat' else components[0].upper() + '_R')
+    elif len(components[0]) == 3:
+        if 'Ace' in components[1]:
+            return ['ACE_R',components[0].upper(),'NME']
+        else:
+            return ['ACE',components[0].upper(),'NME_R']
 
     if cap:
         if len(components[0]) == 3:
@@ -122,7 +128,7 @@ def match_mol(mol: list, AAs_reference: dict, seq: list):
 
         mapdict = {}
         # #try simple matching by neighbor elements
-        for order in range(4):
+        for order in range(5):
             n1 = AL.get_neighbor_elements(order)
             n2 = AL_ref.get_neighbor_elements(order)
 
@@ -135,7 +141,11 @@ def match_mol(mol: list, AAs_reference: dict, seq: list):
                 if val == 1:
                     if AL.atoms[n1.index(key)].idx not in mapdict.keys():
                         logging.debug(AL.atoms[n1.index(key)].idx,mapdict)
-                        mapdict[AL.atoms[n1.index(key)].idx] = AL_ref.atoms[n2.index(key)].idx
+                        try:
+                            mapdict[AL.atoms[n1.index(key)].idx] = AL_ref.atoms[n2.index(key)].idx
+                        except ValueError:
+                            continue
+                        
 
         rmapdict = dict(map(reversed, mapdict.items()))
         if len(mapdict.keys()) < len(AL):
@@ -242,7 +252,8 @@ class Atom:
                 curr_neighbors.extend(neighbor.neighbors)
 
         elements = ''.join(sorted([neighbor.element for neighbor in curr_neighbors]))
-
+        return elements
+    
     def get_neighbor_idxs(self,order):
         curr_neighbors = [self]
         for _ in range(order):
