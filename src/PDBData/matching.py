@@ -49,7 +49,14 @@ def seq_from_filename(filename:Path, AAs_reference:dict=None, cap:bool=True):
     '''    
     components = filename.stem.split(sep='_')
     seq = []
-    seq.append(components[0].upper() if components[1] == 'nat' else components[0].upper() + '_R')
+
+    if not any([components[1][:3] in ['Ace','Nme']]):
+        seq.append(components[0].upper() if components[1] == 'nat' else components[0].upper() + '_R')
+    elif len(components[0]) == 3:
+        if 'Ace' in components[1]:
+            return ['ACE_R',components[0].upper(),'NME']
+        else:
+            return ['ACE',components[0].upper(),'NME_R']
 
     if cap:
         if len(components[0]) == 3:
