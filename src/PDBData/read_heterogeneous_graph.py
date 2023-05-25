@@ -126,7 +126,7 @@ def from_homogeneous_and_mol(g, offmol):
     idxs = relationship_indices_from_offmol(offmol)
 
     # make them all numpy
-    idxs = {key: value.numpy() for key, value in idxs.items()}
+    idxs = {key: value.numpy().astype(np.int64) for key, value in idxs.items()}
 
     # also include n1
     idxs["n1"] = np.arange(g.number_of_nodes())[:, None]

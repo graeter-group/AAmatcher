@@ -16,6 +16,9 @@ import torch
 from PDBData.utils import utilities, utils
 from PDBData import parametrize
 
+# NOTE draw function
+# NOTE pepgen has the leucin hb3, hb2 problem -> seems to be okay from openmm bonds side
+# also gly and phe have it
 #%%
 
 
@@ -110,7 +113,6 @@ class PDBMolecule:
         self.permutation = None
 
         self.graph_data = {} # dictionary holding all of the data in the graph
-        self.graph = None # dgl graph object only holding the connectivity
 
 
     def write_pdb(self, pdb_path:Union[str, Path]="my_pdb.pdb")->None:
@@ -269,15 +271,11 @@ class PDBMolecule:
         Returns a heterogeneous dgl graph of n-body tuples for forcefield parameter prediction.
         The data stored in the class is keyed by: ("n1","xyz"), ("g","u_qm") ("n1","grad_qm")
         """
-        if not self.graph is None:
-            g = self.graph
-        else:
-            with tempfile.TemporaryDirectory() as tmp:
-                pdbpath = os.path.join(tmp, 'pep.pdb')
-                with open(pdbpath, "w") as pdb_file:
-                    pdb_file.writelines([line for line in self.pdb])
-                g = utils.pdb2dgl(pdbpath)
-                self.graph = g
+        with tempfile.TemporaryDirectory() as tmp:
+            pdbpath = os.path.join(tmp, 'pep.pdb')
+            with open(pdbpath, "w") as pdb_file:
+                pdb_file.writelines([line for line in self.pdb])
+            g = utils.pdb2dgl(pdbpath)
 
         # write data in the graph:
         if graph_data:
@@ -285,11 +283,11 @@ class PDBMolecule:
                 for feat in self.graph_data[level].keys():
                     g.nodes[level].data[feat] = torch.tensor(self.graph_data[level][feat])
 
-            g.nodes["n1"].data["xyz"] = torch.tensor(self.xyz).transpose(0,1)
+            g.nodes["n1"].data["xyz"] = torch.tensor(self.xyz, dtype=torch.float32).transpose(0,1)
             if not self.gradients is None:
-                g.nodes["n1"].data["grad_qm"] = torch.tensor(self.gradients).transpose(0,1)
+                g.nodes["n1"].data["grad_qm"] = torch.tensor(self.gradients, dtype=torch.float32).transpose(0,1)
             if not self.energies is None:
-                g.nodes["g"].data["u_qm"] = torch.tensor(self.energies).unsqueeze(0)
+                g.nodes["g"].data["u_qm"] = torch.tensor(self.energies, dtype=torch.float32).unsqueeze(0)
         return g
 
 
@@ -323,11 +321,11 @@ class PDBMolecule:
         Also writes reference data (such as the energy/gradients minus nonbonded and which torsion coefficients are zero) to the graph.
         """
         g = self.to_dgl(graph_data=False)
-        g.nodes["n1"].data["xyz"] = torch.tensor(self.xyz).transpose(0,1)
+        g.nodes["n1"].data["xyz"] = torch.tensor(self.xyz, dtype=torch.float32,).transpose(0,1)
         g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, topology=self.to_openmm().topology)
 
-        torch_energies = None if self.energies is None else torch.tensor(self.energies).unsqueeze(dim=0)
-        torch_gradients = None if self.gradients is None else torch.tensor(self.gradients).transpose(0,1)
+        torch_energies = None if self.energies is None else torch.tensor(self.energies, dtype=torch.float32,).unsqueeze(dim=0)
+        torch_gradients = None if self.gradients is None else torch.tensor(self.gradients, dtype=torch.float32,).transpose(0,1)
 
         ref_suffix = "_ref" + suffix if "u_ref" in g.nodes["g"].data.keys() else "_ref"
 
@@ -984,9 +982,6 @@ if __name__ == "__main__":
 
     m = PDBMolecule.from_xyz(xyz, elements, energies, gradients)
     #%%
-    m.parametrize()
-    g = m.to_dgl()
-    g.nodes['g'].data.keys()
     #%%
     e = g.nodes['g'].data['u_qm'].detach().clone().numpy()
     a = g.nodes['g'].data['u_total_amber99sbildn'].numpy()
@@ -1089,6 +1084,9 @@ if __name__ == "__main__":
         energies = Quantity(np.array(energies)-np.array(energies).mean(axis=-1), SPICE_ENERGY).value_in_unit(ENERGY_UNIT)
 
     m = PDBMolecule.from_xyz(xyz, elements, energies, gradients)
+    #%%
+    g = m.to_dgl()
+    g.nodes["n2"].data["idxs"]
     #%%
     print(m.validate_confs())  
     #%%

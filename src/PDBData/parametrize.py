@@ -60,12 +60,15 @@ EPSILON_MIN = 0.05 * unit.kilojoules_per_mole
 def parametrize_amber(g, topology, forcefield=ForceField('amber99sbildn.xml'), n_max_periodicities=6, suffix="_amber99sbildn",
 parameters=["charge", "LJ", "bond", "angle", "torsion"],
 energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "total", "bonded"], forces=True, write_data=True, get_charges=None):
-
+    """
+    get_charges: Function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
+    """
     ZERO_CHARGE = 1e-20 # used to supress exception when setting charges to zero
 
     manual_charges = None
     if not get_charges is None:
         manual_charges = get_charges(topology)
+        manual_charges = torch.tensor([c.value_in_unit(units.CHARGE_UNIT) for c in manual_charges], dtype=torch.float32)
 
     sys = forcefield.createSystem(topology=topology)
 
@@ -142,17 +145,17 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
                 if "LJ" in parameters:
 
                     g.nodes["n1"].data["epsilon%s"%suffix] = torch.zeros(
-                        force.getNumParticles(), 1
+                        force.getNumParticles(), 1, dtype=torch.float32,
                     )
 
                     g.nodes["n1"].data["sigma%s"%suffix] = torch.zeros(
-                        force.getNumParticles(), 1
+                        force.getNumParticles(), 1, dtype=torch.float32,
                     )
 
                 if "charge" in parameters:
 
                     g.nodes["n1"].data["q%s"%suffix] = torch.zeros(
-                        force.getNumParticles(), 1
+                        force.getNumParticles(), 1, dtype=torch.float32,
                     )
 
                 for idx in range(force.getNumParticles()):
@@ -188,11 +191,11 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
                     continue
 
                 g.nodes["n2"].data["eq%s"%suffix] = torch.zeros(
-                    force.getNumBonds() * 2, 1
+                    force.getNumBonds() * 2, 1, dtype=torch.float32,
                 )
 
                 g.nodes["n2"].data["k%s"%suffix] = torch.zeros(
-                    force.getNumBonds() * 2, 1
+                    force.getNumBonds() * 2, 1, dtype=torch.float32,
                 )
 
                 for idx in range(force.getNumBonds()):
@@ -224,11 +227,11 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
                     continue
 
                 g.nodes["n3"].data["eq%s"%suffix] = torch.zeros(
-                    force.getNumAngles() * 2, 1
+                    force.getNumAngles() * 2, 1, dtype=torch.float32,
                 )
 
                 g.nodes["n3"].data["k%s"%suffix] = torch.zeros(
-                    force.getNumAngles() * 2, 1
+                    force.getNumAngles() * 2, 1, dtype=torch.float32,
                 )
 
                 for idx in range(force.getNumAngles()):

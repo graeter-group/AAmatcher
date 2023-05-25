@@ -57,3 +57,5 @@ tmp/
 /.luarc.json
 
 data/
+npy_charge_dicts/
+**/nohup.out

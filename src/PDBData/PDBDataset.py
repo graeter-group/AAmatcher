@@ -12,6 +12,9 @@ from PDBData.units import DISTANCE_UNIT, ENERGY_UNIT, FORCE_UNIT
 from openmm.unit import bohr, Quantity, hartree, mole
 from openmm.unit import unit
 from openmm.app import ForceField
+
+# NOTE: BUILD FILTER FOR RESIDUES THAT ARE NOT IN RES LIST OF THE XYZ MATCHING
+
 #%%
 
 class PDBDataset:
@@ -62,14 +65,16 @@ class PDBDataset:
         """
         pass
 
-    def save_npz(self, path:Union[str, Path], overwrite:bool=False):
+    def save_npz(self, path:Union[str, Path], overwrite:bool=False)->None:
         """
         Save the dataset to npz files.
         """
-        if os.path.exists(str(path)) and not overwrite:
-            raise FileExistsError(f"path {str(path)} already exists, set overwrite=True to overwrite it.")
+        if os.path.exists(str(path)):
+            if not overwrite:
+                raise FileExistsError(f"path {str(path)} already exists, set overwrite=True to overwrite it.")
         
-        os.makedirs(path, exist_ok=True)
+            os.makedirs(str(path), exist_ok=True)
+
         for id, mol in enumerate(self.mols):
             mol.compress(str(Path(path)/Path(str(id)+".npz")))
     
@@ -98,10 +103,16 @@ class PDBDataset:
             obj.append(mol)
         return obj
 
-    def save_dgl(self, path:Union[str, Path], idxs:List[int]=None):
+    def save_dgl(self, path:Union[str, Path], idxs:List[int]=None, overwrite:bool=False)->None:
         """
         Saves the dgl graphs that belong to the dataset.
         """
+        if os.path.exists(str(path)):
+            if not overwrite:
+                raise FileExistsError(f"path {str(path)} already exists, set overwrite=True to overwrite it.")
+        
+        os.makedirs(str(Path(path).parent), exist_ok=True)
+
         dgl.save_graphs(path, self.to_dgl(idxs))
 
     
@@ -130,12 +141,14 @@ class PDBDataset:
             print("filtering valid mols of PDBDataset by comparing with class ff...")
         keep = []
         removed = 0
+        kept = 0
         for i, mol in enumerate(self.mols):
             valid = mol.conf_check(forcefield=forcefield, sigmas=sigmas)
             keep.append(valid)
             removed += int(not valid)
+            kept += int(valid)
             if self.info:
-                print(f"filtering {i+1}/{len(self.mols)}, kept {len(self)}, removed {removed}", end="\r")
+                print(f"filtering {i+1}/{len(self.mols)}, kept {kept}, removed {removed}", end="\r")
         if self.info:
             print()
 
@@ -212,7 +225,7 @@ class PDBDataset:
 
 
     @classmethod
-    def from_spice(cls, path: Union[str,Path], info:bool=True):
+    def from_spice(cls, path: Union[str,Path], info:bool=True, n_max:int=None):
         """
         Generates a dataset from an hdf5 file with spice unit convention.
         """
@@ -231,7 +244,8 @@ class PDBDataset:
             hdf5_distance=SPICE_DISTANCE,
             hdf5_energy=SPICE_ENERGY,
             hdf5_force=SPICE_FORCE,
-            info=info
+            info=info,
+            n_max=n_max,
         )
 
 
