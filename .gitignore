@@ -59,3 +59,4 @@ tmp/
 data/
 npy_charge_dicts/
 **/nohup.out
+**/.vscode
