@@ -16,6 +16,18 @@ if __name__=="__main__":
         old_keys = list(d.keys())
         for k in old_keys:
             d[k.upper()] = d.pop(k)
+
+        # convert all values to floats
+        for k in d.keys():
+            for k2 in d[k].keys():
+                try:
+                    d[k][k2] = float(d[k][k2])
+                except:
+                    for k3 in d[k][k2].keys():
+                        try:
+                            d[k][k2][k3] = float(d[k][k2][k3])
+                        except:
+                            pass
         os.makedirs(str(new_path/Path(p.parent.stem)), exist_ok=True)
 
         with open(str(new_path/Path(p.parent.stem)/Path(p.stem))+".json", "w") as f:
