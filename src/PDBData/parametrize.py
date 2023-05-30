@@ -59,16 +59,25 @@ EPSILON_MIN = 0.05 * unit.kilojoules_per_mole
 # get_charges is a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology
 def parametrize_amber(g, topology, forcefield=ForceField('amber99sbildn.xml'), n_max_periodicities=6, suffix="_amber99sbildn",
 parameters=["charge", "LJ", "bond", "angle", "torsion"],
-energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "total", "bonded"], forces=True, write_data=True, get_charges=None):
+energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "total", "bonded"], forces=True, write_data=True, get_charges=None, charge_suffix=None, openffmol=None):
     """
     get_charges: Function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
+    if not openffmol is None, get_charge can also take an openffmolecule instead.
+    charge_suffix: suffix for charges and charge_energy in the graph. If None, suffix is used.
     """
-    ZERO_CHARGE = 1e-20 # used to supress exception when setting charges to zero
+    ZERO_CHARGE = 1e-20 # used to suppress exception when setting charges to zero
+
+    if charge_suffix is None:
+        charge_suffix = suffix
 
     manual_charges = None
     if not get_charges is None:
-        manual_charges = get_charges(topology)
+        if not openffmol is None:
+            manual_charges = get_charges(openffmol)
+        else:
+            manual_charges = get_charges(topology)
         manual_charges = torch.tensor([c.value_in_unit(units.CHARGE_UNIT) for c in manual_charges], dtype=torch.float32)
+
 
     sys = forcefield.createSystem(topology=topology)
 
@@ -154,7 +163,7 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
 
                 if "charge" in parameters:
 
-                    g.nodes["n1"].data["q%s"%suffix] = torch.zeros(
+                    g.nodes["n1"].data["q%s"%charge_suffix] = torch.zeros(
                         force.getNumParticles(), 1, dtype=torch.float32,
                     )
 
@@ -174,9 +183,9 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
 
                     if "charge" in parameters:
                         if not manual_charges is None:
-                            g.nodes["n1"].data["q%s"%suffix][position] = manual_charges[position].value_in_unit(units.CHARGE_UNIT)
+                            g.nodes["n1"].data["q%s"%charge_suffix][position] = manual_charges[position]
                         else:
-                            g.nodes["n1"].data["q%s"%suffix][position] = charge.value_in_unit(
+                            g.nodes["n1"].data["q%s"%charge_suffix][position] = charge.value_in_unit(
                                 units.CHARGE_UNIT,
                             )
 
@@ -537,7 +546,7 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
             g.nodes["g"].data["u_improper"+suffix] = energies_improper_torsion
 
         if "charge" in energies:
-            g.nodes["g"].data["u_charge"+suffix] = energies_coulomb
+            g.nodes["g"].data["u_charge"+charge_suffix] = energies_coulomb
 
         if "LJ" in energies:
             g.nodes["g"].data["u_LJ"+suffix] = energies_LJ

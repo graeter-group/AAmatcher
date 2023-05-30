@@ -12,8 +12,7 @@ from PDBData.units import DISTANCE_UNIT, ENERGY_UNIT, FORCE_UNIT
 from openmm.unit import bohr, Quantity, hartree, mole
 from openmm.unit import unit
 from openmm.app import ForceField
-
-# NOTE: BUILD FILTER FOR RESIDUES THAT ARE NOT IN RES LIST OF THE XYZ MATCHING
+import json
 
 #%%
 
@@ -73,7 +72,7 @@ class PDBDataset:
             if not overwrite:
                 raise FileExistsError(f"path {str(path)} already exists, set overwrite=True to overwrite it.")
         
-            os.makedirs(str(path), exist_ok=True)
+        os.makedirs(str(path), exist_ok=True)
 
         for id, mol in enumerate(self.mols):
             mol.compress(str(Path(path)/Path(str(id)+".npz")))
@@ -83,12 +82,10 @@ class PDBDataset:
         """
         Loads a dataset from an hdf5 file.
         """
-        obj = cls()
-        # load here
-        return obj
+        pass
 
     @classmethod
-    def load_npz(cls, path:Union[str, Path], keep_order=False):
+    def load_npz(cls, path:Union[str, Path], keep_order=False, n_max=None):
         """
         Loads a dataset from npz files.
         """
@@ -98,7 +95,11 @@ class PDBDataset:
             paths = Path(path).rglob('*.npz')
         else:
             paths = sorted([p for p in Path(path).rglob('*.npz')])
-        for npz in paths:
+
+        for i, npz in enumerate(paths):
+            if n_max is not None:
+                if i >= n_max:
+                    break
             mol = PDBMolecule.load(Path(npz))
             obj.append(mol)
         return obj
@@ -107,6 +108,9 @@ class PDBDataset:
         """
         Saves the dgl graphs that belong to the dataset.
         """
+        if len(self) == 0:
+            raise ValueError("cannot save empty dataset")
+
         if os.path.exists(str(path)):
             if not overwrite:
                 raise FileExistsError(f"path {str(path)} already exists, set overwrite=True to overwrite it.")
@@ -115,20 +119,31 @@ class PDBDataset:
 
         dgl.save_graphs(path, self.to_dgl(idxs))
 
+        if idxs is None:
+            idxs = list(range(len(self)))
+
+        seqpath = str(Path(path).parent/Path(path).stem) + "_seq.json"
+        with open (seqpath, "w") as f:
+            json.dump([self.mols[i].sequence for i in idxs], f)
+
+
     
-    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None)->None:
+    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'),suffix:str="_amber99sbildn", get_charges=None, charge_suffix=None, openff_charge_flag=False)->None:
         """
         Parametrizes the dataset with a forcefield.
         Writes the following entries to the graph:
         ...
         get_charges: a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
+        if not openffmol is None, get_charge can also take an openffmolecule instead.
         """
+        openffmol = None
+
         if self.info:
             print("parametrizing PDBDataset...")
         for i, mol in enumerate(self.mols):
             if self.info:
                 print(f"parametrizing {i+1}/{len(self.mols)}", end="\r")
-            mol.parametrize(forcefield=forcefield, suffix=suffix, get_charges=get_charges)
+            mol.parametrize(forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, openff_charge_flag=openff_charge_flag)
         if self.info:
             print()
 
@@ -169,6 +184,8 @@ class PDBDataset:
 
         # use slicing to modify the list inplace:
         self.mols[:] = [mol for i, mol in enumerate(self.mols) if keep[i]]
+        if self.info:
+            print(f"removed {len(keep)-sum(keep)} mols after filtering out high energy confs")
 
 
     @classmethod
@@ -184,7 +201,8 @@ class PDBDataset:
         hdf5_force: unit = FORCE_UNIT,
         n_max:int=None,
         skip_errs:bool=True,
-        info:bool=True,):
+        info:bool=True,
+        randomize:bool=False,):
         """
         Generates a dataset from an hdf5 file.
         """
@@ -195,7 +213,12 @@ class PDBDataset:
         if info:
             print("loading dataset from hdf5 file...") 
         with h5py.File(path, "r") as f:
-            for name in f.keys():
+            it = f.keys()
+            if randomize:
+                import random
+                it = list(it)
+                random.shuffle(it)
+            for name in it:
                 if not n_max is None:
                     if len(obj) > n_max:
                         break
@@ -210,8 +233,11 @@ class PDBDataset:
                     energies = Quantity(np.array(energies) - np.array(energies).mean(axis=-1), hdf5_energy).value_in_unit(ENERGY_UNIT)
 
                     mol = PDBMolecule.from_xyz(elements=elements, xyz=xyz, energies=energies, gradients=grads)
+                    mol.name = name
                     obj.append(mol)
                     counter += 1
+                except KeyboardInterrupt:
+                    raise
                 except:
                     failed_counter += 1
                     if not skip_errs:
@@ -225,7 +251,7 @@ class PDBDataset:
 
 
     @classmethod
-    def from_spice(cls, path: Union[str,Path], info:bool=True, n_max:int=None):
+    def from_spice(cls, path: Union[str,Path], info:bool=True, n_max:int=None, randomize:bool=False):
         """
         Generates a dataset from an hdf5 file with spice unit convention.
         """
@@ -235,7 +261,7 @@ class PDBDataset:
         SPICE_ENERGY = HARTREE_PER_PARTICLE
         SPICE_FORCE = SPICE_ENERGY / SPICE_DISTANCE
 
-        return cls.from_hdf5(
+        obj = cls.from_hdf5(
             path,
             element_key="atomic_numbers",
             energy_key="dft_total_energy",
@@ -246,7 +272,50 @@ class PDBDataset:
             hdf5_force=SPICE_FORCE,
             info=info,
             n_max=n_max,
+            randomize=randomize,
         )
+
+        obj.remove_names_spice()
+        return obj
+
+    
+    def remove_names(self, patterns:List[str])->None:
+        """
+        Removes the molecules with names where one of the patterns occur.
+        """
+
+        keep = []
+
+        for i, mol in enumerate(self.mols):
+            valid = True
+            if not mol.name is None:
+                for pattern in patterns:
+                    if pattern in mol.name:
+                        valid = False
+                        break
+
+            keep.append(valid)
+
+        # use slicing to modify the list inplace:
+        self.mols[:] = [mol for i, mol in enumerate(self.mols) if keep[i]]
+        
+
+    def remove_names_spice(self)->None:
+
+        # the names of all residues that occur:
+        resnames = list(set([r for mol in self.mols for r in mol.name.split("-")]))
+        resnames = [r.upper() for r in resnames]
+
+        import json
+        with open(Path(__file__).parent/ Path("xyz2res/scripts/hashed_residues.json"), "r") as f:
+            # hard code the added since it isnt in the json file but can still be mapped, see xyz2res
+            ALLOWED_RESIDUES = set(list(json.load(f).values()) + ["ILE", "LEU"])
+
+        # subtract the allowed residues:
+        remove_res = list(set(resnames) - set(ALLOWED_RESIDUES))
+        if self.info:
+            print(f"filtering for known residues...\nfound residues:{resnames}\nallowed are {ALLOWED_RESIDUES},\nremoving residues:{remove_res}")
+        self.remove_names(remove_res)
 
 
 #%%
@@ -254,6 +323,8 @@ if __name__ == "__main__":
     spicepath = Path(__file__).parent.parent.parent / Path("mains/small_spice")
     dspath = Path(spicepath)/Path("small_spice.hdf5")
     ds = PDBDataset.from_spice(dspath)
+    #%%
+    print(*ds[3].pdb)
     # %%
     ds.filter_validity()
     len(ds)

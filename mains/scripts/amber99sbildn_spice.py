@@ -22,6 +22,7 @@ if __name__ == "__main__":
     #%%
     if ds is None:
         ds = PDBDataset.load_npz(dspath)
+        ds.remove_names_spice()
     ds.parametrize(forcefield=ForceField("amber99sbildn.xml"))
     #%%
     # remove conformations with energy > 60 kcal/mol from min energy in ds[i]
@@ -34,6 +35,8 @@ if __name__ == "__main__":
     
     if ds is None:
         ds = PDBDataset.load_npz(dspath)
+        ds.remove_names_spice()
+
 
     # remove conformations with energy > 60 kcal/mol from min energy in ds[i]
     ds.filter_confs(max_energy=60)

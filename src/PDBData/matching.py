@@ -72,7 +72,7 @@ def seq_from_filename(filename:Path, AAs_reference:dict=None, cap:bool=True):
                     raise ValueError(f"Invalid filename {filename} for sequence conversion!")
         else:
             raise ValueError(f"Invalid filename {filename} for sequence conversion!")
-    return seq 
+    return seq
 
 def generate_radical_reference(AAs_reference: dict, AA: str, heavy_name: str, log:bool=True):
     '''

@@ -13,12 +13,10 @@ import ase
 import numpy as np
 import PDBData.matching
 import torch
-from PDBData.utils import utilities, utils
+from PDBData.utils import utilities, utils, draw_mol
 from PDBData import parametrize
 
-# NOTE draw function
-# NOTE pepgen has the leucin hb3, hb2 problem -> seems to be okay from openmm bonds side
-# also gly and phe have it
+# NOTE: BUILD FILTER FOR RESIDUES THAT ARE NOT IN RES LIST OF THE XYZ MATCHING
 #%%
 
 
@@ -51,8 +49,8 @@ class PDBMolecule:
         List of strings representing the pdb-file of some conformation.
         This stores information on connectivity and atom types of the molecule, not the on the conformations.
 
-    sequence: list
-        List of strings describing the sequence
+    sequence: str
+        String of threeletter amino acid codes representing the sequence of the molecule. Separated by '-', capitalized and including caps.
 
     residues: np.ndarray
         List of strings containing the residues by atom in the order of the element member variable, only set if initialized by xyz.
@@ -108,7 +106,7 @@ class PDBMolecule:
         self.sequence = None
         self.residues = None
         self.residue_numbers = None
-        self.name = None
+        self.name = None # optional
 
         self.permutation = None
 
@@ -159,7 +157,7 @@ class PDBMolecule:
         if not self.gradients is None:
             arrays["gradients"] = self.gradients
         arrays["permutation"] = self.permutation
-        arrays["sequence"] = np.array(self.sequence)
+        arrays["sequence"] = np.array((self.sequence))
 
         for level in self.graph_data.keys():
             for feat in self.graph_data[level].keys():
@@ -183,7 +181,7 @@ class PDBMolecule:
         if "gradients" in d.keys():
             obj.gradients = d["gradients"]
         obj.permutation = d["permutation"]
-        obj.sequence = d["sequence"].tolist()
+        obj.sequence = str(d["sequence"]) # assume that the entry is given as np array with one element
 
         for key in d.keys():
             if " " in key:
@@ -265,6 +263,12 @@ class PDBMolecule:
         g.ndata["atomic_number"] = torch.nn.functional.one_hot(torch.tensor(self.elements))
         return g
 
+    def draw(self):
+        """
+        Draws the molecular graph using networx.
+        """
+        g = self.to_graph()
+        draw_mol(g, show=True)
 
     def to_dgl(self, graph_data:bool=True)->graph:
         """
@@ -299,7 +303,16 @@ class PDBMolecule:
             pdbpath = os.path.join(tmp, 'pep.pdb')
             with open(pdbpath, "w") as pdb_file:
                 pdb_file.writelines([line for line in self.pdb])
-                mol = utils.pdb2openff(pdbpath)
+            mol = utils.pdb2openff(pdbpath)
+        return mol
+    
+
+    def to_openff_graph(self):
+        """
+        Returns an openff molecule for representing the graph structure of the molecule, without chemical details such as bond order, formal charge and stereochemistry.
+        """
+        openmm_mol = self.to_openmm()
+        mol = utils.openmm2openff_graph(openmm_mol.topology)
         return mol
 
 
@@ -311,25 +324,33 @@ class PDBMolecule:
             pdbpath = os.path.join(tmp, 'pep.pdb')
             with open(pdbpath, "w") as pdb_file:
                 pdb_file.writelines([line for line in self.pdb])
-            return PDBFile(pdbpath)
+            openmm_pdb = PDBFile(pdbpath)
+        openmm_pdb = utils.replace_h23_to_h12(openmm_pdb)
+        return openmm_pdb
 
 
-    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None)->None:
+    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None, charge_suffix:str=None, ref_suffix:str="_ref", openff_charge_flag=False)->None:
         """
         Stores the forcefield parameters and energies/gradients in the graph_data dictionary.
         get_charges is a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
         Also writes reference data (such as the energy/gradients minus nonbonded and which torsion coefficients are zero) to the graph.
+        if not openffmol is None, get_charge can also take an openffmolecule instead.
+        If the charge model taket an openff molecule as input, set openff_charge_flag to True.
         """
         g = self.to_dgl(graph_data=False)
         g.nodes["n1"].data["xyz"] = torch.tensor(self.xyz, dtype=torch.float32,).transpose(0,1)
-        g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, topology=self.to_openmm().topology)
+
+        openffmol = None
+        if openff_charge_flag:
+            openffmol = self.to_openff()
+
+        g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, topology=self.to_openmm().topology, openffmol=openffmol)
+
 
         torch_energies = None if self.energies is None else torch.tensor(self.energies, dtype=torch.float32,).unsqueeze(dim=0)
         torch_gradients = None if self.gradients is None else torch.tensor(self.gradients, dtype=torch.float32,).transpose(0,1)
 
-        ref_suffix = "_ref" + suffix if "u_ref" in g.nodes["g"].data.keys() else "_ref"
-
-        g = utilities.write_reference_data(g, energies=torch_energies, gradients=torch_gradients, class_ff="amber99sbildn", ref_suffix=ref_suffix)
+        g = utilities.write_reference_data(g, energies=torch_energies, gradients=torch_gradients, class_ff=suffix, ref_suffix=ref_suffix)
 
         for level in g.ntypes:
             if not level in self.graph_data.keys():
@@ -479,7 +500,7 @@ class PDBMolecule:
 
 
     @classmethod
-    def from_pdb(cls, pdbpath:Union[str,Path], xyz:np.ndarray=None, energies:np.ndarray=None, gradients:np.ndarray=None):
+    def from_pdb(cls, pdbpath:Union[str,Path], xyz:np.ndarray=None, energies:np.ndarray=None, gradients:np.ndarray=None, sequence:str=None):
         """
         Initializes the object from a pdb file and an xyz array of shape (N_confsxN_atomsx3). The atom order is the same as in the pdb file.
         """
@@ -499,6 +520,7 @@ class PDBMolecule:
                 raise RuntimeError(f"Gradients and positions must have the same shape. Shapes are {gradients.shape} and {xyz.shape}.")
             
         obj = cls()
+        obj.sequence = sequence
         pdbmol = PDBFile(pdbpath)
         obj.elements = np.array([a.element.atomic_number for a in pdbmol.topology.atoms()])
         if xyz is None:
@@ -541,7 +563,13 @@ class PDBMolecule:
 
         if sequence is None:
             sequence = PDBData.matching.seq_from_filename(logfile, AAs_reference, cap)
-        obj.sequence = sequence
+
+        obj.sequence = ''
+        for aa in sequence:
+            obj.sequence += aa
+            obj.sequence += '-'
+        obj.sequence = obj.sequence[:-1]
+
 
         mol, trajectory = PDBData.matching.read_g09(logfile, obj.sequence, AAs_reference, log=logging)
 
@@ -611,18 +639,6 @@ class PDBMolecule:
         if residues is None or res_numbers is None:
             residues, res_numbers = xyz2res(xyz[0], elements, debug=debug)
 
-        # # find a permutation that orders the residues and the atoms by element according to openmm, i.e. N, O, C, H:
-        # def get_order_parameter(element, res_number):
-        #     if (element == 7):
-        #         return 10*res_number + 1
-        #     elif (element == 8):
-        #         return 10*res_number + 2
-        #     elif (element == 6):
-        #         return 10*res_number + 3
-        #     elif (element == 1):
-        #         return 10*res_number + 4
-        #     else:
-        #         return 10*res_number
 
         # order such that residues belong toghether 
         l = [(res_numbers[i], i) for i in range(len(res_numbers))]
@@ -647,12 +663,12 @@ class PDBMolecule:
         obj.res_numbers = np.array(res_numbers)
         obj.residues = residues
         
-        obj.sequence = []
+        seq = []
         num_before = -1
         for j,i in enumerate(res_numbers):
             if i != num_before:
                 num_before = i
-                obj.sequence.append(residues[j])
+                seq.append(residues[j])
 
         # preparation for getting the pdb file
         AAs_reference = PDBData.matching.read_rtp(rtp_path)
@@ -665,14 +681,14 @@ class PDBMolecule:
 
         ase_mol.set_atomic_numbers(elements)
 
-        mol, _ = PDBData.matching.read_g09(None, obj.sequence, AAs_reference, trajectory_in=[ase_mol], log=logging)
+        mol, _ = PDBData.matching.read_g09(None, seq, AAs_reference, trajectory_in=[ase_mol], log=logging)
 
-        atom_order = PDBData.matching.match_mol(mol, AAs_reference, obj.sequence, log=logging)
+        atom_order = PDBData.matching.match_mol(mol, AAs_reference, seq, log=logging)
 
         # concatenate the permutations:
         obj.permutation = np.array(perm)[atom_order]
 
-        pdb, _ = PDBMolecule.pdb_from_ase(ase_conformation=ase_mol, sequence=obj.sequence, AAs_reference=AAs_reference, atom_order=atom_order)
+        pdb, _ = PDBMolecule.pdb_from_ase(ase_conformation=ase_mol, sequence=seq, AAs_reference=AAs_reference, atom_order=atom_order)
 
         # NOTE convert to openmm standard:
         # with tempfile.NamedTemporaryFile(mode='r+') as f:
@@ -686,6 +702,12 @@ class PDBMolecule:
 
         obj.elements = elements[atom_order]
         obj.xyz = xyz[:,atom_order]
+
+        obj.sequence = ''
+        for aa in seq:
+            obj.sequence += aa
+            obj.sequence += '-'
+        obj.sequence = obj.sequence[:-1]
 
         # NOTE set residue and res numbers in correct order
         
