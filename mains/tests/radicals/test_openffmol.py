@@ -101,7 +101,7 @@ atom
 # %%
 atom.GetMass()
 # %%
-from PDBData.utils.utils import pdb2openff_graph, pdb2openff, pd
+from PDBData.utils.utils import pdb2openff_graph, pdb2openff
 
 # %%
 m = pdb2openff_graph("F.pdb")
@@ -127,10 +127,13 @@ check_bonds(m_rad, m2) # should fail
 mr = m_rad.to_rdkit()
 # aromatic canot be inferred, ring membership can
 for atom in mr.GetAtoms():
-    print(atom.IsInRing(), atom.IsInRingSize(6), atom.GetIsAromatic())
+    print(atom.IsInRing(), atom.IsInRingSize(6), atom.GetIsAromatic(), atom.GetTotalDegree(), atom.GetAtomicNum())
 # %%
+
+
+# CHECK FORCE FIELD COMPATIBILITY
 from PDBData.PDBMolecule import PDBMolecule
-m_rad = PDBMolecule.from_pdb("F_rad.pdb")
+new_rad = PDBMolecule.from_pdb("F_rad.pdb")
 # %%
-m_rad.parametrize()
+new_rad.parametrize()
 # %%

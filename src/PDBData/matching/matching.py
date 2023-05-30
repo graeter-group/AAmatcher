@@ -9,8 +9,8 @@ import os
 import logging
 from ase.calculators.calculator import PropertyNotImplementedError
 
-from PDBData.utils.match_utils import *
-from PDBData.representation import AtomList
+from PDBData.matching.match_utils import *
+from PDBData.matching.representation import AtomList
 
 
 def match_mol(mol: list, AAs_reference: dict, seq: list, log:bool=True):
@@ -317,7 +317,7 @@ if __name__ == "__main__":
     from openmm.unit import angstrom
     import numpy as np
     import tempfile
-    from PDBData.utils.match_utils import read_rtp
+    from PDBData.matching.match_utils import read_rtp
     import ase
     from ase.geometry.analysis import Analysis
     rtp_path = Path(__file__).parent.parent/Path("amber99sb-star-ildnp.ff/aminoacids.rtp")

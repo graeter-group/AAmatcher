@@ -24,8 +24,8 @@
 # SOFTWARE.
 
 
-""" Build simple graph from RDKit molecule object.
-
+""" 
+Build simple graph from RDKit molecule object, containing only geometric data, no chemical information such as bond order, formal charge, etc.
 """
 # =============================================================================
 # IMPORTS
@@ -37,43 +37,15 @@ import torch
 # =============================================================================
 
 def fp_rdkit(atom):
+    """
+    Returns a 10-dimensional feature vector for a given atom.
+    """
     from rdkit import Chem
-
-    HYBRIDIZATION_RDKIT = {
-        Chem.rdchem.HybridizationType.SP: torch.tensor(
-            [1, 0, 0, 0, 0],
-            dtype=torch.get_default_dtype(),
-        ),
-        Chem.rdchem.HybridizationType.SP2: torch.tensor(
-            [0, 1, 0, 0, 0],
-            dtype=torch.get_default_dtype(),
-        ),
-        Chem.rdchem.HybridizationType.SP3: torch.tensor(
-            [0, 0, 1, 0, 0],
-            dtype=torch.get_default_dtype(),
-        ),
-        Chem.rdchem.HybridizationType.SP3D: torch.tensor(
-            [0, 0, 0, 1, 0],
-            dtype=torch.get_default_dtype(),
-        ),
-        Chem.rdchem.HybridizationType.SP3D2: torch.tensor(
-            [0, 0, 0, 0, 1],
-            dtype=torch.get_default_dtype(),
-        ),
-        Chem.rdchem.HybridizationType.S: torch.tensor(
-            [0, 0, 0, 0, 0],
-            dtype=torch.get_default_dtype(),
-        ),
-    }
-    return torch.cat(
-        [
-            torch.tensor(
-                [
+    return torch.tensor(
+                [   
+                    atom.IsInRing() * 1.0,
                     atom.GetTotalDegree(),
-                    atom.GetTotalValence(),
-                    atom.GetExplicitValence(),
-                    atom.GetFormalCharge(),
-                    atom.GetIsAromatic() * 1.0,
+                    atom.GetFormalCharge(), # NOTE: currently, this has no effect
                     atom.GetMass(),
                     atom.IsInRingSize(3) * 1.0,
                     atom.IsInRingSize(4) * 1.0,
@@ -82,25 +54,22 @@ def fp_rdkit(atom):
                     atom.IsInRingSize(7) * 1.0,
                     atom.IsInRingSize(8) * 1.0,
                 ],
-                dtype=torch.get_default_dtype(),
-            ),
-            HYBRIDIZATION_RDKIT[atom.GetHybridization()],
-        ],
-        dim=0,
-    )
-
+                dtype=torch.float32,
+            )
 
 # =============================================================================
 # MODULE FUNCTIONS
 # =============================================================================
-def from_openff_toolkit_mol(mol, use_fp=True):
+def from_openff_toolkit_mol(mol, use_fp=True, max_element=26):
+    """
+    Creates a homogenous dgl graph containing the one-hot encoded elements and, if use_fp, the 10 dimensional rdkit features. Stored in the feature type 'h0'. To get the elements only, use the feature type 'h0' and slice the first max_element elements.
+    """
     import dgl
 
     # enter bonds
     bonds = list(mol.bonds)
     bonds_begin_idxs = [bond.atom1_index for bond in bonds]
     bonds_end_idxs = [bond.atom2_index for bond in bonds]
-    bonds_types = [bond.bond_order for bond in bonds]
 
     # initialize graph
     g = dgl.graph((bonds_begin_idxs, bonds_end_idxs))
@@ -110,28 +79,21 @@ def from_openff_toolkit_mol(mol, use_fp=True):
     n_atoms = mol.n_atoms
     assert n_atoms == g.num_nodes() , f"error initializing the homogeneous graph: inferred {g.num_nodes()} atoms from the given edges but the molecule has {n_atoms}"
 
-    g.ndata["type"] = torch.Tensor(
-        [[atom.atomic_number] for atom in mol.atoms]
-    )
-    
-    h_v = torch.zeros(
-        g.ndata["type"].shape[0], 100, dtype=torch.get_default_dtype()
+    atomic_numbers = torch.Tensor(
+        [atom.atomic_number for atom in mol.atoms]
     )
 
-    h_v[
-        torch.arange(g.ndata["type"].shape[0]),
-        torch.squeeze(g.ndata["type"]).long(),
-    ] = 1.0
+    atomic_numbers = torch.nn.functional.one_hot(atomic_numbers.long(), num_classes=max_element)
 
-    h_v_fp = torch.stack(
-        [fp_rdkit(atom) for atom in mol.to_rdkit().GetAtoms()], axis=0
-    )
+    h_v = atomic_numbers.float()
 
-    if use_fp == True:
-        h_v = torch.cat([h_v, h_v_fp], dim=-1)  # (n_atoms, 117)
+    if use_fp:
+        h_v_fp = torch.stack(
+            [fp_rdkit(atom) for atom in mol.to_rdkit().GetAtoms()], dim=0
+        )
+        h_v = torch.cat([h_v, h_v_fp], dim=-1)  # (n_atoms, 10+max_element)
+
 
     g.ndata["h0"] = h_v
-
-    # g.edata["type"] = torch.Tensor(bonds_types)[:, None].repeat(2, 1)
 
     return g

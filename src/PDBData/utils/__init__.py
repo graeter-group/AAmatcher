@@ -1,1 +1,1 @@
-from . import match_utils, draw_mol, utilities
+from . import draw_mol, utilities, utils

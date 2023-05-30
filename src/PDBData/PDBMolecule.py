@@ -11,10 +11,11 @@ from dgl import graph, add_reverse_edges
 from openmm.unit import angstrom
 import ase
 import numpy as np
-import PDBData.matching
+from PDBData.matching import matching
 import torch
 from PDBData.utils import utilities, utils, draw_mol
 from PDBData import parametrize
+import openff.toolkit.topology
 
 # NOTE: BUILD FILTER FOR RESIDUES THAT ARE NOT IN RES LIST OF THE XYZ MATCHING
 #%%
@@ -275,11 +276,9 @@ class PDBMolecule:
         Returns a heterogeneous dgl graph of n-body tuples for forcefield parameter prediction.
         The data stored in the class is keyed by: ("n1","xyz"), ("g","u_qm") ("n1","grad_qm")
         """
-        with tempfile.TemporaryDirectory() as tmp:
-            pdbpath = os.path.join(tmp, 'pep.pdb')
-            with open(pdbpath, "w") as pdb_file:
-                pdb_file.writelines([line for line in self.pdb])
-            g = utils.pdb2dgl(pdbpath)
+        openff_g = self.to_openff_graph()
+        g = utils.openff2dgl(openff_g)
+
 
         # write data in the graph:
         if graph_data:
@@ -295,16 +294,19 @@ class PDBMolecule:
         return g
 
 
-    def to_openff(self):
+    def to_openff(self, chemical_properties:bool=True)->openff.toolkit.topology.Molecule:
         """
         Returns an openff molecule.
         """
-        with tempfile.TemporaryDirectory() as tmp:
-            pdbpath = os.path.join(tmp, 'pep.pdb')
-            with open(pdbpath, "w") as pdb_file:
-                pdb_file.writelines([line for line in self.pdb])
-            mol = utils.pdb2openff(pdbpath)
-        return mol
+        if not chemical_properties:
+            return self.to_openff_graph()
+        else:
+            with tempfile.TemporaryDirectory() as tmp:
+                pdbpath = os.path.join(tmp, 'pep.pdb')
+                with open(pdbpath, "w") as pdb_file:
+                    pdb_file.writelines([line for line in self.pdb])
+                mol = utils.pdb2openff(pdbpath)
+            return mol
     
 
     def to_openff_graph(self):
@@ -556,13 +558,13 @@ class PDBMolecule:
 
         obj = cls()
 
-        AAs_reference = PDBData.matching.read_rtp(rtp_path)
+        AAs_reference = matching.read_rtp(rtp_path)
 
         if type(logfile) == str:
             logfile = Path(logfile)
 
         if sequence is None:
-            sequence = PDBData.matching.seq_from_filename(logfile, AAs_reference, cap)
+            sequence = matching.seq_from_filename(logfile, AAs_reference, cap)
 
         obj.sequence = ''
         for aa in sequence:
@@ -571,9 +573,9 @@ class PDBMolecule:
         obj.sequence = obj.sequence[:-1]
 
 
-        mol, trajectory = PDBData.matching.read_g09(logfile, obj.sequence, AAs_reference, log=logging)
+        mol, trajectory = matching.read_g09(logfile, obj.sequence, AAs_reference, log=logging)
 
-        atom_order = PDBData.matching.match_mol(mol, AAs_reference, obj.sequence, log=logging)
+        atom_order = matching.match_mol(mol, AAs_reference, obj.sequence, log=logging)
         obj.permutation = np.array(atom_order)
 
         # write single pdb
@@ -671,7 +673,7 @@ class PDBMolecule:
                 seq.append(residues[j])
 
         # preparation for getting the pdb file
-        AAs_reference = PDBData.matching.read_rtp(rtp_path)
+        AAs_reference = matching.read_rtp(rtp_path)
 
         # generate ase molecule from permuted xyz and elements:
         n = xyz[0].shape[0]
@@ -681,9 +683,9 @@ class PDBMolecule:
 
         ase_mol.set_atomic_numbers(elements)
 
-        mol, _ = PDBData.matching.read_g09(None, seq, AAs_reference, trajectory_in=[ase_mol], log=logging)
+        mol, _ = matching.read_g09(None, seq, AAs_reference, trajectory_in=[ase_mol], log=logging)
 
-        atom_order = PDBData.matching.match_mol(mol, AAs_reference, seq, log=logging)
+        atom_order = matching.match_mol(mol, AAs_reference, seq, log=logging)
 
         # concatenate the permutations:
         obj.permutation = np.array(perm)[atom_order]
