@@ -1,8 +1,11 @@
 #%%
-# MAKE PARAMETRIZE CRASH WHEN IT SHOULD
 import warnings
-from openff.toolkit.topology import Molecule
 from openmm import unit
+
+# supress openff warning:
+import logging
+logging.getLogger("openff").setLevel(logging.ERROR)
+from openff.toolkit.topology import Molecule
 
 # only import esploma_charge in the function to make the package independent of it
 def get_espaloma_charge_model():

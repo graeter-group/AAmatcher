@@ -15,6 +15,10 @@ from PDBData.matching import matching
 import torch
 from PDBData.utils import utilities, utils, draw_mol
 from PDBData import parametrize
+
+# supress openff warning:
+import logging
+logging.getLogger("openff").setLevel(logging.ERROR)
 import openff.toolkit.topology
 
 # NOTE: BUILD FILTER FOR RESIDUES THAT ARE NOT IN RES LIST OF THE XYZ MATCHING

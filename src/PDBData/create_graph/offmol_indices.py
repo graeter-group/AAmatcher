@@ -25,6 +25,10 @@
 
 
 import numpy as np
+
+# supress openff warning:
+import logging
+logging.getLogger("openff").setLevel(logging.ERROR)
 from openff.toolkit.topology import Molecule
 
 

@@ -102,6 +102,10 @@ class PDBDataset:
                     break
             mol = PDBMolecule.load(Path(npz))
             obj.append(mol)
+
+        if len(obj.mols) == 0:
+            raise ValueError(f"no npz files found in path {str(path)}")
+
         return obj
 
     def save_dgl(self, path:Union[str, Path], idxs:List[int]=None, overwrite:bool=False)->None:
@@ -143,7 +147,10 @@ class PDBDataset:
         for i, mol in enumerate(self.mols):
             if self.info:
                 print(f"parametrizing {i+1}/{len(self.mols)}", end="\r")
-            mol.parametrize(forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, openff_charge_flag=openff_charge_flag)
+            try:
+                mol.parametrize(forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, openff_charge_flag=openff_charge_flag)
+            except Exception as e:
+                raise type(e)(str(e) + f" in molecule {mol.sequence}")
         if self.info:
             print()
 

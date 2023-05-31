@@ -35,7 +35,6 @@ from openmm.app import ForceField
 from openmm.unit import Quantity
 from . import units
 import copy
-import dgl
 
 # simulation specs, only dummies for force and energy calculation
 TEMPERATURE = 350 * unit.kelvin

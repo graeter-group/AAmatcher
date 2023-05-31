@@ -33,7 +33,12 @@
 import numpy as np
 import torch
 from . import offmol_indices
+
+# supress openff warning:
+import logging
+logging.getLogger("openff").setLevel(logging.ERROR)
 from openff.toolkit.topology import Molecule
+
 from typing import Dict
 
 # =============================================================================

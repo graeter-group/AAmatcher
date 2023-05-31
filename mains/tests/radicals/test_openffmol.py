@@ -135,5 +135,7 @@ for atom in mr.GetAtoms():
 from PDBData.PDBMolecule import PDBMolecule
 new_rad = PDBMolecule.from_pdb("F_rad.pdb")
 # %%
-new_rad.parametrize()
+g = new_rad.to_dgl()
+g.nodes["n1"].data["h0"].shape
+# new_rad.parametrize()
 # %%

@@ -40,7 +40,6 @@ def fp_rdkit(atom):
     """
     Returns a 10-dimensional feature vector for a given atom.
     """
-    from rdkit import Chem
     return torch.tensor(
                 [   
                     atom.IsInRing() * 1.0,

@@ -16,7 +16,7 @@ from PDBData.charge_models.esp_charge import get_espaloma_charge_model
 def model_from_dict(tag:str=None, d_path:Union[str, Path]=None):
     """
     Returns a function that takes a topology and returns a list of charges for each atom in the topology. Uses the dictionary stored in the json file a d_path.
-    tags: ["bmk"]
+    possible tags: ['bmk', 'bmk_rad', 'ref', 'ref_rad_avg', 'ref_rad_heavy, 'amber99sbildn']
     random: randomly assigns charges, keeping the total charge obtained with the tagged model invariant
     """
 
@@ -25,11 +25,13 @@ def model_from_dict(tag:str=None, d_path:Union[str, Path]=None):
         if tag == "bmk":
             d_path = basepath / Path("BMK/AAs_nat.json")
         elif tag == "bmk_rad":
-            d_path = basepath / Path("ref/AAs_rad.json")
+            d_path = basepath / Path("BMK/AAs_rad.json")
         elif tag == "ref":
             d_path = basepath / Path("ref/AAs_nat.json")
-        elif tag == "ref_rad":
-            d_path = basepath / Path("ref/AAs_avg.json")
+        elif tag == "ref_rad_avg":
+            d_path = basepath / Path("ref/AAs_rad_avg.json")
+        elif tag == "ref_rad_heavy":
+            d_path = basepath / Path("ref/AAs_rad_heavy.json")
         elif tag == "amber99sbildn":
             return None
         else:
