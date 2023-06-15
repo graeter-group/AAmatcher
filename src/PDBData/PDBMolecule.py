@@ -8,13 +8,14 @@ import tempfile
 from openmm.app import PDBFile, ForceField
 from typing import List, Union, Tuple
 from dgl import graph, add_reverse_edges
-from openmm.unit import angstrom
+from openmm.unit import angstrom, unit, kilocalorie_per_mole, Quantity, hartrees, bohr
 import ase
 import numpy as np
 from PDBData.matching import matching
 import torch
 from PDBData.utils import utilities, utils, draw_mol
 from PDBData import parametrize
+import math
 
 # supress openff warning:
 import logging
@@ -335,7 +336,7 @@ class PDBMolecule:
         return openmm_pdb
 
 
-    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None, charge_suffix:str=None, ref_suffix:str="_ref", openff_charge_flag=False)->None:
+    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None, charge_suffix:str="_ref", ref_suffix:str="_ref", openff_charge_flag=False, allow_radicals=False)->None:
         """
         Stores the forcefield parameters and energies/gradients in the graph_data dictionary.
         get_charges is a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
@@ -348,9 +349,12 @@ class PDBMolecule:
 
         openffmol = None
         if openff_charge_flag:
-            openffmol = self.to_openff()
+            openffmol = self.to_openff(chemical_properties=True)
 
-        g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, topology=self.to_openmm().topology, openffmol=openffmol)
+        if allow_radicals and get_charges is None:
+            raise RuntimeError("Radicals are not supported with forcefield charges.")
+
+        g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, topology=self.to_openmm().topology, openffmol=openffmol, allow_radicals=allow_radicals)
 
 
         torch_energies = None if self.energies is None else torch.tensor(self.energies, dtype=torch.float32,).unsqueeze(dim=0)
@@ -410,7 +414,7 @@ class PDBMolecule:
 
     def filter_confs(self, max_energy:float=60., max_force:float=None)->bool:
         """
-        Filters out conformations with energies or forces that are over 60 kcal/mol away from the minimum of the dataset (not the actual minimum). Apply this before parametrizing or re-apply the parametrization after filtering. Units are kcal/mol and kcal/mol/angstrom.
+        Filters out conformations with energies or forces that are over max_energy kcal/mol (or max_force kcal/mol/angstrom) away from the minimum of the dataset (not the actual minimum). Apply this before parametrizing or re-apply the parametrization after filtering. Units are kcal/mol and kcal/mol/angstrom.
         """
         if (not max_energy is None) and (not self.energies is None):
             energies = self.energies - self.energies.min()
@@ -508,7 +512,7 @@ class PDBMolecule:
     @classmethod
     def from_pdb(cls, pdbpath:Union[str,Path], xyz:np.ndarray=None, energies:np.ndarray=None, gradients:np.ndarray=None, sequence:str=None):
         """
-        Initializes the object from a pdb file and an xyz array of shape (N_confsxN_atomsx3). The atom order is the same as in the pdb file.
+        Initializes the object from a pdb file and an xyz array of shape (N_confsxN_atomsx3). Units must be the ones specified for the class. The atom order is the same as in the pdb file.
         """
 
         if type(pdbpath) == Path:
@@ -546,9 +550,11 @@ class PDBMolecule:
         return obj
 
     @classmethod
-    def from_gaussian_log(cls, logfile:Union[str,Path], cap:bool=True, rtp_path=None, sequence:list=None, logging:bool=False):
+    def from_gaussian_log(cls, logfile:Union[str,Path], cap:bool=True, rtp_path=None, sequence:list=None, logging:bool=False, e_unit:unit=kilocalorie_per_mole*23.0609, dist_unit=angstrom, force_unit=kilocalorie_per_mole*23.0609/angstrom):
+        # assume by default that the energy unit is eV and the distance unit is angstrom
         """
         Use a gaussian logfile for initialization. Returns the initialized object.
+        By default, it is assumed that the energy unit is eV and the distance unit is angstrom
         Parameters
         ----------
         logfile: str/pathlib.Path
@@ -576,15 +582,14 @@ class PDBMolecule:
             obj.sequence += '-'
         obj.sequence = obj.sequence[:-1]
 
+        mol, trajectory = matching.read_g09(logfile, sequence, AAs_reference, log=logging)
 
-        mol, trajectory = matching.read_g09(logfile, obj.sequence, AAs_reference, log=logging)
-
-        atom_order = matching.match_mol(mol, AAs_reference, obj.sequence, log=logging)
+        atom_order = matching.match_mol(mol, AAs_reference, sequence, log=logging)
         obj.permutation = np.array(atom_order)
 
         # write single pdb
         conf = trajectory[0]
-        obj.pdb, elements = PDBMolecule.pdb_from_ase(ase_conformation=conf, sequence=obj.sequence, AAs_reference=AAs_reference,atom_order=atom_order)
+        obj.pdb, elements = PDBMolecule.pdb_from_ase(ase_conformation=conf, sequence=sequence, AAs_reference=AAs_reference,atom_order=atom_order)
 
         obj.elements = np.array(elements)
 
@@ -595,29 +600,124 @@ class PDBMolecule:
 
         # NOTE: take higher precision for energies since we are interested in differences that are tiny compared to the absolute magnitude
         for step in trajectory:
-            try:
-                energy = step.get_total_energy()
-            except ase.calculators.calculator.PropertyNotImplementedError:
-                energy = float("nan")
-            energies.append(energy)
+            if not energies is None:
+                try:
+                    energy = step.get_total_energy()
+                    energies.append(energy) 
+                except ase.calculators.calculator.PropertyNotImplementedError:
+                    energies = None
 
-            # NOTE: implement forces
+            if not gradients is None:
+                try:
+                    grad = -step.get_forces()
+                    gradients.append(grad)
+                except ase.calculators.calculator.PropertyNotImplementedError:
+                    gradients = None
 
-            pos = step.positions[atom_order] # array of shape n_atoms x 3 in the correct order
+            pos = step.positions # array of shape n_atoms x 3 in the correct order
             positions.append(pos)
         
-        obj.energies = np.array(energies)
-        obj.xyz = np.array(positions)
+        if not energies is None:
+            energies = np.array(energies)
+            energies -= energies.min()
+            obj.energies = Quantity(energies, unit=e_unit).value_in_unit(kilocalorie_per_mole)
+
+        if not gradients is None:
+            # apply permutation to gradients
+            gradients = np.array(gradients)[:,atom_order]
+            obj.gradients = Quantity(gradients, unit=force_unit).value_in_unit(kilocalorie_per_mole/angstrom)
+
+        # apply permutation to positions
+        positions = np.array(positions)[:,atom_order]
+        obj.xyz = Quantity(positions, unit=dist_unit).value_in_unit(angstrom)
+        
+        return obj
+    
+    @classmethod
+    def from_gaussian_log_rad(cls, logfile:Union[str,Path], cap:bool=True, rtp_path=None, logging:bool=False, e_unit:unit=kilocalorie_per_mole*23.0609, dist_unit=angstrom, force_unit=kilocalorie_per_mole*23.0609/angstrom):
+        # assume by default that the energy unit is eV and the distance unit is angstrom
+        """
+        Use a gaussian logfile for initialization. Returns the initialized object.
+        By default, it is assumed that the energy unit is eV and the distance unit is angstrom
+        Parameters
+        ----------
+        logfile: str/pathlib.Path
+            Path to the gaussian log file
+        """
+
+        if rtp_path is None:
+            rtp_path = PDBMolecule.DEFAULT_RTP
+
+        rtp_path = Path(rtp_path)
+        logfile = Path(logfile)
+
+        obj = cls()
+
+        AAs_reference, sequence = matching.get_radref(rtp_path=rtp_path, filename=logfile, cap=cap)
+        
+        obj.sequence = ''
+        for aa in sequence:
+            obj.sequence += aa
+            obj.sequence += '-'
+        obj.sequence = obj.sequence[:-1]
+
+        mol, trajectory = matching.read_g09(logfile, sequence, AAs_reference, log=logging)
+
+        atom_order = matching.match_mol(mol, AAs_reference, sequence, log=logging)
+        obj.permutation = np.array(atom_order)
+
+        # write single pdb
+        conf = trajectory[0]
+        obj.pdb, elements = PDBMolecule.pdb_from_ase(ase_conformation=conf, sequence=sequence, AAs_reference=AAs_reference,atom_order=atom_order)
+
+        obj.elements = np.array(elements)
+
+        # write xyz and energies
+        energies = []
+        positions = []
+        gradients = []
+
+        # NOTE: take higher precision for energies since we are interested in differences that are tiny compared to the absolute magnitude
+        for step in trajectory:
+            if not energies is None:
+                try:
+                    energy = step.get_total_energy()
+                    energies.append(energy) 
+                except ase.calculators.calculator.PropertyNotImplementedError:
+                    energies = None
+
+            if not gradients is None:
+                try:
+                    grad = -step.get_forces()
+                    gradients.append(grad)
+                except ase.calculators.calculator.PropertyNotImplementedError:
+                    gradients = None
+
+            pos = step.positions # array of shape n_atoms x 3 in the correct order
+            positions.append(pos)
+        
+        if not energies is None:
+            energies = np.array(energies)
+            energies -= energies.min()
+            obj.energies = Quantity(energies, unit=e_unit).value_in_unit(kilocalorie_per_mole)
+
+        if not gradients is None:
+            # apply permutation to gradients
+            gradients = np.array(gradients)[:,atom_order]
+            obj.gradients = Quantity(gradients, unit=force_unit).value_in_unit(kilocalorie_per_mole/angstrom)
+
+        # apply permutation to positions
+        positions = np.array(positions)[:,atom_order]
+        obj.xyz = Quantity(positions, unit=dist_unit).value_in_unit(angstrom)
+        
         return obj
 
     @classmethod
     def from_xyz(cls, xyz:np.ndarray, elements:np.ndarray, energies:np.ndarray=None, gradients:np.ndarray=None, rtp_path=None, residues:list=None, res_numbers:list=None, logging:bool=False, debug:bool=False):
         """
-        Use an xyz array of shape (N_confsxN_atomsx3) and an element array of shape (N_atoms) for initialization. The atom order in which xyz and element are stored may differ from that of those used for initilization (See description of the xyz member).
-        The positions must be given in angstrom.
-        Currently only works for:
-        peptides that do not contain TYR, PHE.
-        and R,K: positive charge, D,E: negative charge, H: neutral - HIE
+        Use an xyz array of shape (N_confsxN_atomsx3) and an element array of shape (N_atoms) for initialization. The atom order in which xyz and element are stored may differ from that of those used for initilization (See description of the xyz member). Units must be those specified for the class (angstrom, kcal/mol, kcal/mol/angstrom)
+        Currently only works for the standard amino acids:
+        R,K: positive charge, D,E: negative charge, H: neutral - HIE
         """
         for l, to_be_checked, name in [(1,energies, "energies"), (3,gradients,"gradients")]:
             if not to_be_checked is None:
@@ -689,10 +789,10 @@ class PDBMolecule:
 
         mol, _ = matching.read_g09(None, seq, AAs_reference, trajectory_in=[ase_mol], log=logging)
 
+        # this leaves the sequence invariant.
         atom_order = matching.match_mol(mol, AAs_reference, seq, log=logging)
 
         # concatenate the permutations:
-        obj.permutation = np.array(perm)[atom_order]
 
         pdb, _ = PDBMolecule.pdb_from_ase(ase_conformation=ase_mol, sequence=seq, AAs_reference=AAs_reference, atom_order=atom_order)
 
@@ -705,9 +805,14 @@ class PDBMolecule:
         #     pdb = f.readlines()
         obj.pdb = pdb
 
+        # after applying the perm from xyz2res, we also apply the permutation from the matching:
 
         obj.elements = elements[atom_order]
+        obj.permutation = np.array(perm)[atom_order]
         obj.xyz = xyz[:,atom_order]
+        if not gradients is None:
+            obj.gradients = gradients[:,atom_order]
+
 
         obj.sequence = ''
         for aa in seq:
@@ -717,8 +822,6 @@ class PDBMolecule:
 
         # NOTE set residue and res numbers in correct order
         
-        if not gradients is None:
-            obj.gradients = gradients[:,atom_order]
 
         return obj
 

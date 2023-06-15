@@ -36,16 +36,13 @@ import torch
 # UTILITY FUNCTIONS
 # =============================================================================
 
-def fp_rdkit(atom):
+def in_ring(atom):
     """
-    Returns a 10-dimensional feature vector for a given atom.
+    Returns a feature vector for a given atom.
     """
     return torch.tensor(
                 [   
                     atom.IsInRing() * 1.0,
-                    atom.GetTotalDegree(),
-                    atom.GetFormalCharge(), # NOTE: currently, this has no effect
-                    atom.GetMass(),
                     atom.IsInRingSize(3) * 1.0,
                     atom.IsInRingSize(4) * 1.0,
                     atom.IsInRingSize(5) * 1.0,
@@ -56,12 +53,45 @@ def fp_rdkit(atom):
                 dtype=torch.float32,
             )
 
+def mass(atom):
+    """
+    Returns a feature vector for a given atom.
+    """
+    return torch.tensor(
+                [   
+                    atom.GetMass(),
+                ],
+                dtype=torch.float32,
+            )
+
+def formal_charge(atom):
+    """
+    Returns a feature vector for a given atom.
+    """
+    return torch.tensor(
+                [   
+                    atom.GetFormalCharge(),
+                ],
+                dtype=torch.float32,
+            )
+
+def degree(atom):
+    """
+    Returns a feature vector for a given atom.
+    """
+    return torch.tensor(
+                [   
+                    atom.GetTotalDegree(),
+                ],
+                dtype=torch.float32,
+            )
+
 # =============================================================================
 # MODULE FUNCTIONS
 # =============================================================================
-def from_openff_toolkit_mol(mol, use_fp=True, max_element=26):
+def from_openff_toolkit_mol(mol, use_fp:bool=True, max_element:int=26):
     """
-    Creates a homogenous dgl graph containing the one-hot encoded elements and, if use_fp, the 10 dimensional rdkit features. Stored in the feature type 'h0'. To get the elements only, use the feature type 'h0' and slice the first max_element elements.
+    Creates a homogenous dgl graph containing the one-hot encoded elements and, if use_fp, rdkit features. Stored in the feature type 'h0'. To get the elements only, use the feature type 'h0' and slice the first max_element elements.
     """
     import dgl
 
@@ -84,15 +114,19 @@ def from_openff_toolkit_mol(mol, use_fp=True, max_element=26):
 
     atomic_numbers = torch.nn.functional.one_hot(atomic_numbers.long(), num_classes=max_element)
 
-    h_v = atomic_numbers.float()
+    g.ndata["atomic_number"] = atomic_numbers.float()
 
     if use_fp:
-        h_v_fp = torch.stack(
-            [fp_rdkit(atom) for atom in mol.to_rdkit().GetAtoms()], dim=0
-        )
-        h_v = torch.cat([h_v, h_v_fp], dim=-1)  # (n_atoms, 10+max_element)
+        rd = mol.to_rdkit()
 
+        g.ndata["mass"] = torch.stack([mass(atom) for atom in rd.GetAtoms()], dim=0)
+        g.ndata["formal_charge"] = torch.stack([formal_charge(atom) for atom in rd.GetAtoms()], dim=0)
+        g.ndata["in_ring"] = torch.stack([in_ring(atom) for atom in rd.GetAtoms()], dim=0)
 
-    g.ndata["h0"] = h_v
+        MAX_NUM_BONDS = 6
+        degrees = torch.Tensor([min(MAX_NUM_BONDS, degree(atom).item()) for atom in rd.GetAtoms()])
+        degrees = torch.nn.functional.one_hot(degrees.long(), num_classes=MAX_NUM_BONDS+1)
+        g.ndata["degree"] = degrees.float()
+
 
     return g

@@ -41,7 +41,11 @@ if __name__ == "__main__":
                     f[name][key] = read[name][key][()]
             print()
             print("done")
-
+    #%%
+    # inspect dipeptide names:
+    print(len(set(names_ds)), len(names_ds))
+    caps = [name.upper() for name in names_ds]
+    print(len(set(caps)), len(caps))
     #%%
 
     # make small spice containing only 20 molecules:

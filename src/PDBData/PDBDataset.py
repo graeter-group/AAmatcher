@@ -13,6 +13,7 @@ from openmm.unit import bohr, Quantity, hartree, mole
 from openmm.unit import unit
 from openmm.app import ForceField
 import json
+import copy
 
 #%%
 
@@ -21,8 +22,8 @@ class PDBDataset:
     Handles the generation of dgl graphs from PDBMolecules. Stores PDBMolecules in a list.
     Uses an hdf5 file containing the pdbfiles as string and xyz, elements, energies and gradients as numpy arrays to store tha dataset on a hard drive.
     """
-    def __init__(self)->None:
-        self.mols = []
+    def __init__(self, mols:List[PDBMolecule]=[])->None:
+        self.mols = copy.deepcopy(mols)
         self.info = True
 
     def __len__(self)->int:
@@ -68,9 +69,13 @@ class PDBDataset:
         """
         Save the dataset to npz files.
         """
+        if self.info:
+            print(f"saving PDBDataset of length {len(self)} to npz files...")
         if os.path.exists(str(path)):
             if not overwrite:
                 raise FileExistsError(f"path {str(path)} already exists, set overwrite=True to overwrite it.")
+        if len(self) == 0:
+            raise ValueError("dataset is empty.")
         
         os.makedirs(str(path), exist_ok=True)
 
@@ -132,7 +137,7 @@ class PDBDataset:
 
 
     
-    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'),suffix:str="_amber99sbildn", get_charges=None, charge_suffix=None, openff_charge_flag=False)->None:
+    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'),suffix:str="_amber99sbildn", get_charges=None, charge_suffix="_ref", openff_charge_flag:bool=False, allow_radicals:bool=False)->None:
         """
         Parametrizes the dataset with a forcefield.
         Writes the following entries to the graph:
@@ -140,7 +145,6 @@ class PDBDataset:
         get_charges: a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
         if not openffmol is None, get_charge can also take an openffmolecule instead.
         """
-        openffmol = None
 
         if self.info:
             print("parametrizing PDBDataset...")
@@ -148,7 +152,7 @@ class PDBDataset:
             if self.info:
                 print(f"parametrizing {i+1}/{len(self.mols)}", end="\r")
             try:
-                mol.parametrize(forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, openff_charge_flag=openff_charge_flag)
+                mol.parametrize(forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, openff_charge_flag=openff_charge_flag, allow_radicals=allow_radicals)
             except Exception as e:
                 raise type(e)(str(e) + f" in molecule {mol.sequence}")
         if self.info:
@@ -240,7 +244,7 @@ class PDBDataset:
                     energies = Quantity(np.array(energies) - np.array(energies).mean(axis=-1), hdf5_energy).value_in_unit(ENERGY_UNIT)
 
                     mol = PDBMolecule.from_xyz(elements=elements, xyz=xyz, energies=energies, gradients=grads)
-                    mol.name = name
+                    mol.name = name.upper()
                     obj.append(mol)
                     counter += 1
                 except KeyboardInterrupt:
@@ -288,7 +292,7 @@ class PDBDataset:
     
     def remove_names(self, patterns:List[str])->None:
         """
-        Removes the molecules with names where one of the patterns occur.
+        Removes the molecules with names where one of the patterns occurs.
         """
 
         keep = []
@@ -305,6 +309,7 @@ class PDBDataset:
 
         # use slicing to modify the list inplace:
         self.mols[:] = [mol for i, mol in enumerate(self.mols) if keep[i]]
+        print(f"removed {len(keep)-sum(keep)} mols during remove_names.")
         
 
     def remove_names_spice(self)->None:
@@ -323,6 +328,23 @@ class PDBDataset:
         if self.info:
             print(f"filtering for known residues...\nfound residues:{resnames}\nallowed are {ALLOWED_RESIDUES},\nremoving residues:{remove_res}")
         self.remove_names(remove_res)
+
+        names = []
+        doubles = []
+        for mol in self.mols:
+            seq_from_name = mol.name.upper()
+            seq_from_name = "ACE-"+seq_from_name+"-NME"
+            if seq_from_name != mol.sequence:
+                if self.info:
+                    print(f"WARNING: seq from name {seq_from_name} != seq from xyz2res {mol.sequence}")
+            name = mol.name
+            if name in names:
+                doubles.append(name)
+            else:
+                names.append(name)
+        if len(doubles) > 0:
+            if self.info:
+                print(f"WARNING: found double names {doubles}")
 
 
 #%%

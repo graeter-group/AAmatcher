@@ -42,6 +42,40 @@ STEP_SIZE = 1.0 * unit.femtosecond
 COLLISION_RATE = 1.0 / unit.picosecond
 EPSILON_MIN = 0.05 * unit.kilojoules_per_mole
 
+from PDBData.xyz2res.constants import RESIDUES
+
+
+
+def add_radical_residues(forcefield, topology):
+    """
+    For each residue that is not matched to a template, add a template with the same atoms but with the Hs removed.
+    NOTE: This might cause issues for histidin if the histidin type cannot be determined due to the missing Hs.
+    """
+    [templates, residues] = forcefield.generateTemplatesForUnmatchedResidues(topology)
+    for t_idx, template in enumerate(templates):
+        ref_template = forcefield._templates[template.name]
+        # the atom names stored in the template of the residue
+        ref_names = [a.name for a in ref_template.atoms]
+
+        # delete the H indices since the Hs are not distinguishable anyways
+        # in the template, the Hs are named HB2 and HB3 while in some pdb files they are named HB1 and HB2
+        for i, n in enumerate(ref_names):
+            if n[0] == 'H' and len(n) == 3:
+                ref_names[i] = n[:-1]
+
+        for atom in template.atoms:
+            name = atom.name
+            if name[0] == 'H' and len(name) == 3:
+                name = name[:-1]
+
+            # find the atom with that name in the reference template
+            atom.type = ref_template.atoms[ref_names.index(name)].type
+
+        # create a new template
+        template.name = template.name +f"_rad_{t_idx}"
+        forcefield.registerResidueTemplate(template)
+
+    return forcefield
 
 
 
@@ -57,13 +91,17 @@ EPSILON_MIN = 0.05 * unit.kilojoules_per_mole
 # where conf data is a dictionary containing conformational data
 # get_charges is a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology
 def parametrize_amber(g, topology, forcefield=ForceField('amber99sbildn.xml'), n_max_periodicities=6, suffix="_amber99sbildn",
-parameters=["charge", "LJ", "bond", "angle", "torsion"],
-energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "total", "bonded"], forces=True, write_data=True, get_charges=None, charge_suffix=None, openffmol=None):
+parameters=["charge", "LJ", "bond", "angle", "torsion", "residue"],
+energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "total", "bonded"], forces=True, write_data=True, get_charges=None, charge_suffix=None, openffmol=None, allow_radicals=False):
     """
     get_charges: Function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
     if not openffmol is None, get_charge can also take an openffmolecule instead.
     charge_suffix: suffix for charges and charge_energy in the graph. If None, suffix is used.
     """
+    if allow_radicals:
+        forcefield = copy.deepcopy(forcefield)
+        forcefield = add_radical_residues(forcefield, topology)
+
     ZERO_CHARGE = 1e-20 # used to suppress exception when setting charges to zero
 
     if charge_suffix is None:
@@ -141,6 +179,22 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
     )
 
     if not len(parameters) == 0:
+
+        if "residue" in parameters:
+            g.nodes["n1"].data["residue"] = torch.zeros(
+                        len(atom_lookup.keys()), len(RESIDUES), dtype=torch.float32,
+                    )
+
+            for idx, atom in enumerate(topology.atoms()):
+
+                position = atom_lookup[idx]
+                residue = atom.residue.name
+
+                if residue in RESIDUES:
+                    res_index = RESIDUES.index(residue) # is unique
+                    g.nodes["n1"].data["residue"][position] = torch.nn.functional.one_hot(torch.tensor((res_index)).long(), num_classes=len(RESIDUES)).float()
+                else:
+                    raise RuntimeError(f"A residue could not be assigned since it is not listed in the residues: {residue} not in {RESIDUES}")
 
         for force in sys.getForces():
             name = force.__class__.__name__

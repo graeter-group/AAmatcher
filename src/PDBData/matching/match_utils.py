@@ -1,6 +1,6 @@
 from pathlib import Path
 from itertools import takewhile
-
+from typing import Union, List, Tuple
 
 
 ## utils (from kimmdy) ##
@@ -71,4 +71,24 @@ def _create_subsections(ls):
 ##
 
 
-       
+def radname_from_log(path: Union[Path,str]) -> str:
+    """
+    Returns the name of the radical atom from the log file if this is named properly. only works for single amino acids.
+    """
+
+    path = Path(path)
+    name = path.stem
+    radname = name.split("_")[1]
+    return radname
+
+
+def is_radical(filename: Union[Path,str]) -> bool:
+    """
+    Returns True if the filename is a radical amino acid.
+    """
+    filename = Path(filename)
+    name = filename.stem
+    if "nat" in name:
+        return False
+    else:
+        return True

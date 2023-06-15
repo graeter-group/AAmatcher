@@ -10,6 +10,7 @@ import logging
 from ase.calculators.calculator import PropertyNotImplementedError
 
 from PDBData.matching.match_utils import *
+from PDBData.matching import match_utils
 from PDBData.matching.representation import AtomList
 
 
@@ -46,6 +47,7 @@ def match_mol(mol: list, AAs_reference: dict, seq: list, log:bool=True):
 def seq_from_filename(filename:Path, AAs_reference:dict=None, cap:bool=True):
     '''
     Returns a list of strings describing a sequence found in a filename.
+    Only works for single amino acids with caps, assumes that non-radicals contain '_nat'.
     '''    
     components = filename.stem.split(sep='_')
     seq = []
@@ -74,10 +76,31 @@ def seq_from_filename(filename:Path, AAs_reference:dict=None, cap:bool=True):
             raise ValueError(f"Invalid filename {filename} for sequence conversion!")
     return seq
 
+def get_radref(filename:Union[str,Path], rtp_path:Union[str,Path], cap:bool=True):
+    """
+    Creates a reference dict from an rtp and updates it for a radical with position inferred from the filename and the sequence of the molecule. If the molecule is not a radical, only returns the reference from rtp path and the sequence.
+    """
+    filename = Path(filename)
+    AAs_reference = read_rtp(rtp_path)
+    seq = seq_from_filename(filename=filename, AAs_reference=AAs_reference, cap=cap)
+    if not match_utils.is_radical(filename):
+        return AAs_reference, seq
+    
+    # infer radical atom from filename
+    heavy_name = match_utils.radname_from_log(filename)
+    # infer AA from filename
+    assert len(seq) == 3, f"length of sequence {seq} is not 3, but must be for radicals as of now."
+    rad_AA = seq[1]
+    assert rad_AA.endswith('_R'), f"second residue in sequence {seq} is not a radical, but must be for radicals as of now."
+    rad_AA = rad_AA[:-2]
+    rad_reference = generate_radical_reference(AAs_reference=AAs_reference, AA=rad_AA, heavy_name=heavy_name, log=False)
+
+    return rad_reference, seq
+
 def generate_radical_reference(AAs_reference: dict, AA: str, heavy_name: str, log:bool=True):
     '''
-    String that explains this function
-    Assumes a hydrogen was abstracted from the radical atom
+    generates a dict with reference for one radical residue given by AA and heavy)name.
+    Assumes a hydrogen was abstracted from the radical atom, carrying the name 'heavy_name'
     '''
     if log:
         logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)

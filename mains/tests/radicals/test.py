@@ -26,7 +26,7 @@ def check_bonds(m1, m2):
     assert set(ids) == set(ids_), f"in m1: but not in m2: {set(ids) - set(ids_)}\nin m2: but not in m1: {set(ids_) - set(ids)}"
 #%%
 check_bonds(m, m2)
-# bond check for radicals should fail:
+# bond check between the radical and the original should fail:
 try:
     check_bonds(m_rad, m2)
     raise RuntimeError
