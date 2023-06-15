@@ -16,6 +16,7 @@ import torch
 from PDBData.utils import utilities, utils, draw_mol
 from PDBData import parametrize
 import math
+from PDBData.matching import match_utils
 
 # supress openff warning:
 import logging
@@ -369,17 +370,21 @@ class PDBMolecule:
                 self.graph_data[level][feat] = g.nodes[level].data[feat].detach().numpy()
 
         
-    def get_ase_bonds(self, idxs:List[int]=[0])->List[List[Tuple[int, int]]]:
+    def get_ase_bonds(self, idxs:List[int]=[0], majority_vote=True)->List[List[Tuple[int, int]]]:
         """
         Returns a list of shape len(idxs)*n_bonds of 2-tuples describing the bonds between the atoms where the indices correspond to the order of self.elements, xyz, etc., inferred by ase from the positions and elements only.
         """
         from ase.geometry.analysis import Analysis
         traj = self.to_ase(idxs)
-        try:
-            connectivities = [Analysis(traj[id]).nl[0].get_connectivity_matrix() for id in idxs]
-        except IndexError:
-            raise RuntimeError(f"Index out of bounds for get_ase_bonds. Max idx is {max(idxs)} but there are only {len(self)} conformations.")
-        bonds = [[(n1,n2) for (n1,n2) in c.keys() if n1!=n2] for c in connectivities]
+        if majority_vote:
+            try:
+                connectivities = [Analysis(traj[id]).nl[0].get_connectivity_matrix() for id in idxs]
+            except IndexError:
+                raise RuntimeError(f"Index out of bounds for get_ase_bonds. Max idx is {max(idxs)} but there are only {len(self)} conformations.")
+            bonds = [[(n1,n2) for (n1,n2) in c.keys() if n1!=n2] for c in connectivities]
+
+        else:
+            bonds = match_utils.bond_majority_vote(traj)
         return bonds
         
 

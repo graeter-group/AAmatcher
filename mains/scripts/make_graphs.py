@@ -33,7 +33,7 @@ def make_ds(get_charges, storepath, dspath, openff_charge_flag=False, overwrite=
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tag", "-t", type=str, default=["bmk"], nargs="+", help="tag of the charge model to use, see model_from_dict in charge_models.py. If the tag is 'esp_charge', use espaloma_charge to parametrize.\npossible tags: ['bmk', 'avg', 'heavy, 'amber99sbildn', 'esp_charge'] (esp_charge is only for non-radicals!)")
+    parser.add_argument("--charge", "-c", type=str, dest="tag", default=["bmk"], nargs="+", help="tag of the charge model to use, see model_from_dict in charge_models.py. If the tag is 'esp_charge', use espaloma_charge to parametrize.\npossible tags: ['bmk', 'avg', 'heavy, 'amber99sbildn', 'esp_charge'] (esp_charge is only for non-radicals!)")
     parser.add_argument("--overwrite", "-o", action="store_true", default=False, help="overwrite existing .npz dataset, default:False")
     parser.add_argument("--noise_level", type=float, default=[None], nargs="+", help="noise level to add to the charges, default:None")
     parser.add_argument("--ds_base", type=str, default=str(Path("/hits/fast/mbm/seutelf/data/datasets/PDBDatasets")), help="base path to the dataset, default: /hits/fast/mbm/seutelf/data/datasets/PDBDatasets")
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     for ds_name in args.ds_name:
         for tag in args.tag:
             print()
-            print(f"tag: {tag}")
+            print(f"charge tag: {tag}")
             for noise_level in args.noise_level:
                 dspath = Path(args.ds_base)/Path(ds_name)
                 storebase = str(dspath.parent) if args.storage_dir is None else str(Path(args.ds_base)/Path(args.storage_dir))

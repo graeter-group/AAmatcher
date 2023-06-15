@@ -155,8 +155,7 @@ def read_g09(file: Path, sequence: str, AAs_reference: dict, trajectory_in=None,
     assert pos == len(formula) , f"Mismatch in number of atoms ({pos} vs {len(formula)}) assumed from input sequence {sequence}:{pos} and {formula}:{len(formula)}"
 
     ## split molecule into residues and get list of bonds. reconstruct atomnames using list ##
-    ana = Analysis(trajectory[0])
-    [bonds] = ana.unique_bonds
+    bonds = match_utils.bond_majority_vote(trajectory)
 
     res_AtomLists = []
     for _,AA_delim_idx in enumerate(AA_delim_idxs):
@@ -170,6 +169,7 @@ def read_g09(file: Path, sequence: str, AAs_reference: dict, trajectory_in=None,
         res_AtomLists.append(AtomList(AA_atoms,AA_bonds))
 
     return res_AtomLists, trajectory
+
 
 ################
 # MATCH ONE RESIDUE

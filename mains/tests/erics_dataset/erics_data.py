@@ -1,5 +1,5 @@
 #%%
-store = True
+
 
 from PDBData.PDBDataset import PDBDataset
 from PDBData.PDBMolecule import PDBMolecule
@@ -7,35 +7,34 @@ from openmm.unit import kilocalorie_per_mole, angstrom
 from pathlib import Path
 from PDBData.charge_models.charge_models import model_from_dict
 import copy
-import os
 import shutil
+import os
 
 from pathlib import Path
 dpath = "/hits/fast/mbm/share/datasets_Eric"
 storepath = "/hits/fast/mbm/seutelf/data/datasets/PDBDatasets"
 #%%
 
-overwrite = True
+overwrite = False
 n_max = None
 
 for pathname in [
                 "AA_opt_nat",
-                "AA_scan_nat",
+                # "AA_scan_nat",
                 # "AA_opt_rad",
                 # "AA_scan_rad",
                 ]:
     ds = PDBDataset([])
     counter = 0
 
-    if overwrite:
-        if os.path.exists(str(Path(storepath)/Path(pathname)/Path("base"))):
-            shutil.rmtree(str(Path(storepath)/Path(pathname))/Path("base"))
 
     for p in (Path(dpath)/Path(pathname)).rglob("*.log"):
+        
         try:
             mol = PDBMolecule.from_gaussian_log_rad(p, e_unit=kilocalorie_per_mole*23.0609, dist_unit=angstrom, force_unit=kilocalorie_per_mole*23.0609/angstrom)
         except:
             print(f"Failed to load {p}.")
+            #raise
             continue
         if any([forbidden_res in mol.sequence for forbidden_res in ["HYP", "DOP", "NALA", 
         # "TRP_R", "HIE_R", "ILE_R", "LEU_R", "CYS_R", "TYR_R"
@@ -48,7 +47,7 @@ for pathname in [
             mol.bond_check()
         except:
             print(f"Failed bond check for {p}.")
-            continue
+            #continue
 
         try:
             mol_copy = copy.deepcopy(mol)
@@ -70,27 +69,16 @@ for pathname in [
         if not n_max is None:
             if counter > n_max:
                 break
-    if store:
-        ds.save_npz(Path(storepath)/Path(pathname)/Path("base"), overwrite=True)
-        print(f"Stored {len(ds)} molecules for {pathname}.")
+
+    print(f"Created {len(ds)} molecules for {pathname}.")
 # %%
 
 
 #%%
-do_scatter = False
-if not do_scatter:
-    exit()
-#%%
-# p = Path(storepath)/Path("spice/base")
-p = Path(storepath)/Path("AA_scan_nat/base")
-# p = Path(storepath)/Path("AA_opt_nat/base")
-p = Path(storepath)/Path("AA_opt_rad/base")
-p = Path(storepath)/Path("AA_scan_rad/base")
-
-ds = PDBDataset.load_npz(p)
-# ds = PDBDataset.load_npz(p, n_max=20)
 ds.filter_confs(max_energy=60)
+#%%
 ds.parametrize(allow_radicals=True, get_charges=model_from_dict(tag="bmk"))
+
 #%%
 graphs = ds.to_dgl()
 

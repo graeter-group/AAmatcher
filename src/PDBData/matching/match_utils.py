@@ -1,6 +1,7 @@
 from pathlib import Path
 from itertools import takewhile
 from typing import Union, List, Tuple
+from ase.geometry.analysis import Analysis
 
 
 ## utils (from kimmdy) ##
@@ -92,3 +93,31 @@ def is_radical(filename: Union[Path,str]) -> bool:
         return False
     else:
         return True
+    
+def list_to_tuple(List):
+        if len(List) == 0:
+            return ()
+        else:
+            return (tuple(List[0]),) + list_to_tuple(List[1:])
+    
+def tuple_to_list(tup):
+    if len(tup) == 0:
+        return []
+    else:
+        return [list(tup[0]),] + tuple_to_list(tup[1:])
+        
+
+def bond_majority_vote(trajectory) -> List:
+
+    # do a majority vote on the bonds:
+    bondvotes = {}
+    for idx, state in enumerate(trajectory):
+        ana = Analysis(state)
+        [bonds] = ana.unique_bonds
+        bonds = list_to_tuple(bonds)
+        if not bonds in bondvotes.keys():
+            bondvotes[bonds] = 0
+        bondvotes[bonds] += 1
+    bonds = max(bondvotes, key=bondvotes.get)
+    bonds = tuple_to_list(bonds)
+    return bonds
