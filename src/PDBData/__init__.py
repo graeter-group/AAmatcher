@@ -1,1 +1,1 @@
-from . import matching, PDBMolecule, xyz2res, PDBDataset, parametrize, utils, units, utils, create_graph
+from . import matching, PDBMolecule, xyz2res, PDBDataset, utils, units, utils, create_graph, classical_ff

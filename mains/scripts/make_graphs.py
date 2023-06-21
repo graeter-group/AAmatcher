@@ -8,22 +8,33 @@ import os
 import warnings
 warnings.filterwarnings("ignore") # for esp_charge
 
+FILTER_REF = True # whether to apply the filtering to the reference energies or the qm energies
 
-def make_ds(get_charges, storepath, dspath, openff_charge_flag=False, overwrite=False, allow_radicals=False):
+def make_ds(get_charges, storepath, dspath, openff_charge_flag=False, overwrite=False, allow_radicals=False, n_max=None, collagen=False):
     ds = PDBDataset()
 
-    ds = PDBDataset.load_npz(dspath, n_max=None)
+    ds = PDBDataset.load_npz(dspath, n_max=n_max)
 
-    ds.parametrize(forcefield=ForceField("amber99sbildn.xml"), get_charges=get_charges, openff_charge_flag=openff_charge_flag, allow_radicals=allow_radicals)
+    ff = ForceField("amber99sbildn.xml")
+    if collagen:
+        ff = ForceField("./../../src/PDBData/classical_forcefields/collagen.xml")
+
+    ds.parametrize(forcefield=ff, get_charges=get_charges, openff_charge_flag=openff_charge_flag, allow_radicals=allow_radicals, collagen=collagen)
+
+    # filter out conformations that are way out of equilibrium:
+    ds.filter_confs(max_energy=200, max_force=500, reference=FILTER_REF)
+
     
     ds.save_npz(storepath, overwrite=overwrite)
     ds.save_dgl(str(storepath)+"_dgl.bin", overwrite=overwrite)
     #%%
+
+    ds.parametrize(forcefield=ff, get_charges=get_charges, openff_charge_flag=openff_charge_flag, allow_radicals=allow_radicals, collagen=collagen)
     
     # remove conformations with energy > 60 kcal/mol from min energy in ds[i]
-    ds.filter_confs(max_energy=60, max_force=200)
+    ds.filter_confs(max_energy=60, max_force=200, reference=FILTER_REF)
+
     # unfortunately, have to parametrize again to get the right shapes
-    ds.parametrize(forcefield=ForceField("amber99sbildn.xml"), get_charges=get_charges, openff_charge_flag=openff_charge_flag, allow_radicals=allow_radicals)
     ds.save_npz(str(storepath)+"_60", overwrite=overwrite)
     ds.save_dgl(str(storepath)+"_60_dgl.bin", overwrite=overwrite)
 
@@ -41,6 +52,10 @@ if __name__ == "__main__":
     parser.add_argument("--storage_dir", "-s", type=str, default=None, help="directory path relative to ds_base. in this folder, the parametrizes datasets are stored, named by the tag and noise_level. if None, this is the parent of ds_name. default: None")
     parser.add_argument("--allow_radicals", "-r", action="store_true", default=False)
 
+    parser.add_argument("--n_max", type=int, default=None, help="maximum number of conformations to load from the dataset, default: None")
+
+    parser.add_argument("--collagen", "-col", action="store_true", default=False, help="use collagen the forcefield instead of amber99sbildn")
+
     args = parser.parse_args()
     for ds_name in args.ds_name:
         for tag in args.tag:
@@ -49,7 +64,10 @@ if __name__ == "__main__":
             for noise_level in args.noise_level:
                 dspath = Path(args.ds_base)/Path(ds_name)
                 storebase = str(dspath.parent) if args.storage_dir is None else str(Path(args.ds_base)/Path(args.storage_dir))
+                
                 storepath = os.path.join(str(storebase),tag) # tagged with charge model
+                if args.collagen:
+                    storepath += "_col"
                 if not noise_level is None:
                     storepath += f"_{noise_level}"
 
@@ -65,4 +83,4 @@ if __name__ == "__main__":
                     print()
                     print(f"noise level: {noise_level}")
 
-                make_ds(get_charges=get_charges, storepath=storepath, dspath=dspath, openff_charge_flag=openff_charge_flag, overwrite=args.overwrite, allow_radicals=args.allow_radicals)
+                make_ds(get_charges=get_charges, storepath=storepath, dspath=dspath, openff_charge_flag=openff_charge_flag, overwrite=args.overwrite, allow_radicals=args.allow_radicals, n_max=args.n_max, collagen=args.collagen)

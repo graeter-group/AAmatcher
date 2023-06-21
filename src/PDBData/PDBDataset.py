@@ -14,6 +14,7 @@ from openmm.unit import unit
 from openmm.app import ForceField
 import json
 import copy
+import matplotlib.pyplot as plt
 
 #%%
 
@@ -183,14 +184,14 @@ class PDBDataset:
         
 
         
-    def filter_confs(self, max_energy:float=60., max_force:float=None)->None:
+    def filter_confs(self, max_energy:float=60., max_force:float=200, reference=False)->None:
         """
         Filters out conformations with energies or forces that are over 60 kcal/mol away from the minimum of the dataset (not the actual minimum). Remove molecules is less than 2 conformations are left. Apply this before parametrizing or re-apply the parametrization after filtering. Units are kcal/mol and kcal/mol/angstrom.
         """
 
         keep = []
         for i, mol in enumerate(self.mols):
-            more_than2left = mol.filter_confs(max_energy=max_energy, max_force=max_force)
+            more_than2left = mol.filter_confs(max_energy=max_energy, max_force=max_force, reference=reference)
             keep.append(more_than2left)
 
         # use slicing to modify the list inplace:
@@ -345,6 +346,43 @@ class PDBDataset:
         if len(doubles) > 0:
             if self.info:
                 print(f"WARNING: found double names {doubles}")
+
+
+
+    def energy_hist(self, filename=None, show=True):
+        graphs = self.to_dgl()
+        energies = np.array([])
+        for g in graphs:
+            e = g.nodes['g'].data['u_qm'].flatten().detach().clone().numpy()
+            e -= e.min()
+            energies = np.concatenate([energies, e], axis=0)
+        plt.hist(energies, bins=100)
+        plt.xlabel("QM Energies")
+        plt.ylabel("Count")
+        plt.title("QM Energies")
+        plt.yscale("log")
+        if not filename is None:
+            plt.savefig(filename)
+        if show:
+            plt.show()
+
+
+
+    def grad_hist(self, filename=None, show=True):
+        graphs = self.to_dgl()
+        grads = np.array([])
+        for g in graphs:
+            e = g.nodes['n1'].data['grad_qm'].flatten().detach().clone().numpy()
+            grads = np.concatenate([grads, e], axis=0)
+        plt.hist(grads, bins=100)
+        plt.xlabel("QM Gradients")
+        plt.ylabel("Count")
+        plt.title("QM Gradients")
+        plt.yscale("log")
+        if not filename is None:
+            plt.savefig(filename)
+        if show:
+            plt.show()
 
 
 #%%

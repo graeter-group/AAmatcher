@@ -10,7 +10,8 @@ import numpy as np
 from typing import List, Tuple, Dict, Union, Callable
 from pathlib import Path
 from PDBData.charge_models.esp_charge import get_espaloma_charge_model
-from PDBData.charge_models.find_radical import get_radicals
+from PDBData.utils.find_radical import get_radicals
+from PDBData.utils.utils import replace_h23_to_h12
 #%%
 
 
@@ -98,13 +99,30 @@ def from_dict(d:dict, top:topology, d_rad:dict=None, charge_unit=unit.elementary
         if res_idx in rad_indices:
             rad_name = rad_names[rad_indices.index(res_idx)]
 
-        # IF ID IN RADICAL INDICES, DIFFERENT BEHAVIOU. DICT GIVEN BY THE RAD NAME
+
+        # IF ID IN RADICAL INDICES, DICT IS GIVEN BY THE RAD NAME
         res = atom.residue.name
         name = atom.name
 
         # hard code that we only have HIE atm
         if res == "HIS":
             res = "HIE"
+
+        H23_dict = replace_h23_to_h12.d
+
+        if not rad_name is None:
+            # rename all HB2 to HB1 because these are in the dict for radicals and have the same parameters since they are indisinguishable
+            if not name in d_rad[res][rad_name].keys():
+                if res in H23_dict.keys():
+                    orig_name = name
+                    if name in [f"H{lvl}2" for lvl in H23_dict[res]]:
+                        name = name.replace("2", "1")
+                    elif name in [f"H{lvl}1" for lvl in H23_dict[res]]:
+                        name = name.replace("1", "2")
+            if not name in d_rad[res][rad_name].keys():
+                raise ValueError(f"Neither {name} nor {orig_name} in radical dictionary for {res} {rad_name}.\nStored atom names are {d_rad[res][rad_name].keys()}")
+
+
 
         # hard code the H naming of caps (maybe do this in the to_openmm function instead?)
         if res == "ACE":
@@ -124,18 +142,17 @@ def from_dict(d:dict, top:topology, d_rad:dict=None, charge_unit=unit.elementary
             raise ValueError(f"Radical {rad_name} not in dictionary for residue {res}, radicals are {d_rad[res].keys()}")
 
         if name not in (d[res] if rad_name is None else d_rad[res][rad_name]):
-            raise ValueError(f"(Atom {name}, Residue {res}) not in dictionary, atom names are {d[res].keys() if rad_name is None else d_rad[res][rad_name].keys()}")
+            raise ValueError(f"(Atom {name}, Residue {res}, Radical {rad_name}) not in dictionary, atom names are {d[res].keys() if rad_name is None else d_rad[res][rad_name].keys()}")
 
         charge = float(d[res][name]) if rad_name is None else float(d_rad[res][rad_name][name])
 
         if len((d[res] if rad_name is None else d_rad[res][rad_name]).keys()) != num_atoms:
-            raise RuntimeError(f"Residue {res} has {num_atoms} atoms, but dictionary has {len((d[res] if rad_name is None else d_rad[res][rad_name]).keys())} atoms.")
+            raise RuntimeError(f"Residue {res} has {num_atoms} atoms, but dictionary has {len((d[res] if rad_name is None else d_rad[res][rad_name]).keys())} atoms.\ndictionary entries: {(d[res] if rad_name is None else d_rad[res][rad_name]).keys()},\natom names: {[a.name for a in atom.residue.atoms()]},\nrad name is {rad_name},\nres_idx is {res_idx}, \nrad_indices are {rad_indices},\nrad_names are {rad_names}")
 
         charge = openmm.unit.Quantity(charge, charge_unit)
         charges.append(charge)
 
     return charges
-
 
 
 #%%

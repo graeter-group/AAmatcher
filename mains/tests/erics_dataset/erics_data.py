@@ -1,6 +1,5 @@
 #%%
 
-
 from PDBData.PDBDataset import PDBDataset
 from PDBData.PDBMolecule import PDBMolecule
 from openmm.unit import kilocalorie_per_mole, angstrom
@@ -19,9 +18,9 @@ overwrite = False
 n_max = None
 
 for pathname in [
-                "AA_opt_nat",
+                # "AA_opt_nat",
                 # "AA_scan_nat",
-                # "AA_opt_rad",
+                "AA_opt_rad",
                 # "AA_scan_rad",
                 ]:
     ds = PDBDataset([])
@@ -29,41 +28,51 @@ for pathname in [
 
 
     for p in (Path(dpath)/Path(pathname)).rglob("*.log"):
-        
         try:
             mol = PDBMolecule.from_gaussian_log_rad(p, e_unit=kilocalorie_per_mole*23.0609, dist_unit=angstrom, force_unit=kilocalorie_per_mole*23.0609/angstrom)
-        except:
-            print(f"Failed to load {p}.")
-            #raise
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print(f"Failed to load {p}:\n  e: {e}")
+            print()
+            if not any([skip_res in str(p) for skip_res in ["Glu", "Asp", "Ile", "Trp", "NmeCH3", "Nme", "Hie", "AceCH3", "Hyp", "Dop", "Nala"]]):
+                raise
             continue
-        if any([forbidden_res in mol.sequence for forbidden_res in ["HYP", "DOP", "NALA", 
-        # "TRP_R", "HIE_R", "ILE_R", "LEU_R", "CYS_R", "TYR_R"
-        ]]):
-            continue
+
         # filter out conformations with energies above 200 kcal/mol away from the minimum
         mol.filter_confs(max_energy=200, max_force=500)
 
         try:
             mol.bond_check()
-        except:
-            print(f"Failed bond check for {p}.")
-            #continue
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print(f"Failed bond check for {p}:\n  e: {e}")
+            print()
+            continue
 
         try:
             mol_copy = copy.deepcopy(mol)
             mol_copy.parametrize(allow_radicals=True, get_charges=model_from_dict(tag="bmk"))
-        except:
-            print(f"Failed to parametrize {p}.")
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print(f"Failed to parametrize {p}:\n  e: {e}")
+            print()
+            raise
             continue
 
         if mol.energies is None:
             print(f"No energies present for {p}.")
+            print()
             continue
 
         if mol.gradients is None:
             print(f"No energies present for {p}.")
+            print()
             continue
 
+        print(f"appending {counter}")
         ds.append(mol)
         counter += 1
         if not n_max is None:
@@ -119,4 +128,40 @@ plt.scatter(f, af)
 plt.plot(f,f, color="black", linestyle="--")
 plt.xlabel("QM Grads")
 plt.ylabel("FF Grads")
+# %%
+# test:
+from openmm.app import ForceField
+# %%
+rad = PDBMolecule.from_pdb("./../radicals/F_rad.pdb")
+topology = rad.to_openmm().topology
+# %%
+forcefield=ForceField('amber99sbildn.xml')
+[templates, residues] = forcefield.generateTemplatesForUnmatchedResidues(topology)
+for t_idx, template in enumerate(templates):
+    ref_template = forcefield._templates[template.name]
+    for a in template.atoms:
+        print(a.bondedTo)
+        break
+
+# %%
+
+# %%
+p = "/hits/fast/mbm/share/datasets_Eric/AA_opt_rad/Cys_SG_opt.log"
+p = "/hits/fast/mbm/share/datasets_Eric/AA_opt_rad/Arg_NH1_opt.log"
+
+# p = "/hits/fast/mbm/share/datasets_Eric/AA_opt_rad/Lys_NZ_opt.log"
+mol = PDBMolecule.from_gaussian_log_rad(p)
+top = mol.to_openmm().topology
+forcefield=ForceField('amber99sbildn.xml')
+
+#%%
+templates = forcefield.getMatchingTemplates(top)
+# %%
+for t in templates:
+    print(t.name)
+# %%
+for atom in top.atoms():
+    print(atom.name)
+# %%
+forcefield._templates
 # %%

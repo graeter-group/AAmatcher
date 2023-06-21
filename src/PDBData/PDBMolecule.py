@@ -14,9 +14,10 @@ import numpy as np
 from PDBData.matching import matching
 import torch
 from PDBData.utils import utilities, utils, draw_mol
-from PDBData import parametrize
+from PDBData.classical_ff import parametrize
 import math
 from PDBData.matching import match_utils
+from PDBData.classical_ff import collagen_utility
 
 # supress openff warning:
 import logging
@@ -117,7 +118,9 @@ class PDBMolecule:
 
         self.permutation = None
 
-        self.graph_data = {} # dictionary holding all of the data in the graph
+        self.graph_data = {} # dictionary holding all of the data in the graph, Graph data is stored by chaining dicts like this: graph_data[node_type][feat_type] = data
+        # shape of data can differ from the shape of self.xyz / self.gradients but is the shape of the data stored in the actual graph.
+        
 
 
     def write_pdb(self, pdb_path:Union[str, Path]="my_pdb.pdb")->None:
@@ -154,6 +157,7 @@ class PDBMolecule:
     def to_dict(self)->dict:
         """
         Create a dictionary holding arrays of the internal data.
+        Graph data is stored by using keys that are of the form f'{level} {feature}'.
         """
         arrays = {}
         arrays["elements"] = self.elements
@@ -168,7 +172,7 @@ class PDBMolecule:
 
         for level in self.graph_data.keys():
             for feat in self.graph_data[level].keys():
-                key = level + " " + feat
+                key = f'{level} {feat}'
                 arrays[key] = self.graph_data[level][feat]
 
         return arrays
@@ -177,7 +181,8 @@ class PDBMolecule:
     @classmethod
     def from_dict(cls, d):
         """
-        Internal helper function
+        Internal helper function. Creates a PDBMolecule from a dictionary.
+        Assumes that the dictionary is created by the to_dict method, i.e. that the graph data is stored by using keys that are of the form f'{level} {feature}'.
         """
         obj = cls()
         obj.elements = d["elements"]
@@ -242,12 +247,12 @@ class PDBMolecule:
         return traj
 
 
-    def get_bonds(self, from_pdb:bool=True)->List[Tuple[int, int]]:
+    def get_bonds(self, from_pdb:bool=True, collagen=True)->List[Tuple[int, int]]:
         """
         Returns a list of tuples describing the bonds between the atoms where the indices correspond to the order of self.elements, xyz, etc. .
         """
         if from_pdb:
-            openmm_mol = self.to_openmm()
+            openmm_mol = self.to_openmm(collagen=collagen)
             bonds = [(b[0].index, b[1].index) for b in openmm_mol.topology.bonds()]
             min_bond = np.array(bonds).flatten().min()
             if min_bond != 0:
@@ -324,7 +329,7 @@ class PDBMolecule:
         return mol
 
 
-    def to_openmm(self)->PDBFile:
+    def to_openmm(self, collagen=True)->PDBFile:
         """
         Returns an openmm molecule containing the pdb member variable.
         """
@@ -333,11 +338,15 @@ class PDBMolecule:
             with open(pdbpath, "w") as pdb_file:
                 pdb_file.writelines([line for line in self.pdb])
             openmm_pdb = PDBFile(pdbpath)
+        # NOTE: the following is bad to do that because one cannot differentiate between the case where CB has 2 Hs or there are 2 CBs with one H each.
+        # however, it is our standard now...
         openmm_pdb = utils.replace_h23_to_h12(openmm_pdb)
+        if collagen:
+            openmm_pdb.topology = collagen_utility.add_bonds(openmm_pdb.topology)
         return openmm_pdb
 
 
-    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None, charge_suffix:str="_ref", ref_suffix:str="_ref", openff_charge_flag=False, allow_radicals=False)->None:
+    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None, charge_suffix:str="_ref", ref_suffix:str="_ref", openff_charge_flag=False, allow_radicals=False, collagen=False)->None:
         """
         Stores the forcefield parameters and energies/gradients in the graph_data dictionary.
         get_charges is a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
@@ -350,12 +359,17 @@ class PDBMolecule:
 
         openffmol = None
         if openff_charge_flag:
+            if collagen:
+                raise RuntimeError("Collagen specific residues are not supported with openff charges.")
             openffmol = self.to_openff(chemical_properties=True)
 
         if allow_radicals and get_charges is None:
             raise RuntimeError("Radicals are not supported with forcefield charges.")
 
-        g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, topology=self.to_openmm().topology, openffmol=openffmol, allow_radicals=allow_radicals)
+        if collagen and forcefield == ForceField('amber99sbildn.xml'):
+            forcefield = ForceField('./classical_ff/collagen_ff.xml')
+
+        g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, topology=self.to_openmm(collagen=collagen).topology, openffmol=openffmol, allow_radicals=allow_radicals)
 
 
         torch_energies = None if self.energies is None else torch.tensor(self.energies, dtype=torch.float32,).unsqueeze(dim=0)
@@ -417,35 +431,79 @@ class PDBMolecule:
             return rmse_e < sigmas[0]*std_e
 
 
-    def filter_confs(self, max_energy:float=60., max_force:float=None)->bool:
+    def filter_confs(self, max_energy:float=60., max_force:float=None, reference=False)->bool:
         """
         Filters out conformations with energies or forces that are over max_energy kcal/mol (or max_force kcal/mol/angstrom) away from the minimum of the dataset (not the actual minimum). Apply this before parametrizing or re-apply the parametrization after filtering. Units are kcal/mol and kcal/mol/angstrom.
+        Returns True if more than two conformations remain.
+        If reference is true, uses u_ref and grad_ref, i.e. usually the qm value subtracted by the nonbonded contribution instead of the stored energies and gradients. This can only be done after parametrising.
+        For filtering the graph data, assume that entries are energies if and only if they are stored in 'g' and have 'u_' in their feature name. For gradients, the same applies with 'n1' and 'grad_'.
         """
         if (not max_energy is None) and (not self.energies is None):
-            energies = self.energies - self.energies.min()
-            energy_mask = energies < max_energy
+            if not reference:
+                energies = self.energies - self.energies.min()
+            else:
+                # take the reference energies for filtering
+                if not "u_ref" in self.graph_data["g"].keys():
+                    raise RuntimeError(f"No reference energies found. Please parametrize first or set reference=False, \ngraph_data keys are {self.graph_data['g'].keys()}")
+                energies = self.graph_data["g"]["u_ref"] - self.graph_data["g"]["u_ref"].min()
+
+            # create a mask for energies below max_energy
+            energy_mask = np.abs(energies) < max_energy
         else:
             energy_mask = np.ones(len(self), dtype=bool)
 
         if (not max_force is None) and (not self.gradients is None):
-            forces = np.max(np.max(np.abs(self.gradients), axis=-1), axis=-1)
+            if not reference:
+                forces = self.gradients
+            else:
+
+                if not "grad_ref" in self.graph_data["n1"].keys():
+                    raise RuntimeError(f"No reference gradients found. Please parametrize first or set reference=False., \ngraph_data keys are {self.graph_data['n1'].keys()}")
+                forces = self.graph_data["n1"]["grad_ref"].transpose(1,0,2)
+            
+            # for each conf, take the maximum along atoms and spatial dimension
+
+            forces = np.max(np.max(np.abs(forces), axis=-1), axis=-1)
+
             force_mask = forces < max_force
         else:   
             force_mask = np.ones(len(self), dtype=bool)
 
-        mask = energy_mask & force_mask
+        mask = energy_mask * force_mask
+        assert mask.shape[0] == 1, "mask should be of shape (1,n_confs), i.e. batching is disabled"
+        mask = mask[0]
+        # apply mask
+        try:
+            if not self.energies is None:
+                self.energies = self.energies[mask]
+            if not self.gradients is None:
+                self.gradients = self.gradients[mask]
+            self.xyz = self.xyz[mask]
 
-        if not self.energies is None:
-            self.energies = self.energies[mask]
-        if not self.gradients is None:
-            self.gradients = self.gradients[mask]
-        self.xyz = self.xyz[mask]
+            # now also filter the graph data, there we may forget something, in this case one has to re-parametrize after filtering
+            for key in self.graph_data.keys():
+                if key == "g":
+                    # graph data for the whole molecule
+                    for k in self.graph_data[key].keys():
+                        if "u_" in k:
+                            # assume shape of energies is (1,n_confs).
+                            self.graph_data[key][k] = self.graph_data[key][k][:,mask]
+                elif key == "n1":
+                    for k in self.graph_data[key].keys():
+                        if "grad_" in k or "xyz" in k:
+                            # assume shape of grad and xyz is (atoms,n_confs,3).
+                            self.graph_data[key][k] = self.graph_data[key][k][:,mask]
+                    
+
+        except IndexError as e:
+            raise RuntimeError(f"Index out of bounds for filter_confs. Max idx is {max(mask)} but there are only {len(self)} conformations.\nThis can be due to removing mols after paraetrizing (i.e. after writing graph data.). Parametrize first.") from e
         
+        # return True if there are more than two conformations left
         return self.xyz.shape[0] > 1
 
 
 
-    def bond_check(self, idxs:List[int]=None, perm:bool=False, seed:int=0)->None:
+    def bond_check(self, idxs:List[int]=None, perm:bool=False, seed:int=0, collagen=True)->None:
         """
         For each configuration, creates a list of tuples describing the bonds between the atoms where the indices correspond to the order of self.elements, xyz, etc. and compares it to the list of bonds inferred by ase from the positions and elements only. Throws an error if the lists are not identical.
         If perm is True, also creates a list of bonds for a permutation of the atoms and checks if the lists are identical after permutating back.
@@ -457,10 +515,10 @@ class PDBMolecule:
         if idxs is None:
             idxs = np.arange(len(self))
         # sort the bonds by the smaller index:
-        pdb_bonds = [( min(b[0],b[1]), max(b[0], b[1]) ) for b in self.get_bonds()]
+        pdb_bonds = [( min(b[0],b[1]), max(b[0], b[1]) ) for b in self.get_bonds(collagen=collagen)]
         ase_bonds = [[( min(b[0],b[1]), max(b[0], b[1]) ) for b in id_bonds] for id_bonds in self.get_ase_bonds(idxs)]
 
-        atoms = [a.name for a in self.to_openmm().topology.atoms()]
+        atoms = [a.name for a in self.to_openmm(collagen=collagen).topology.atoms()]
 
         for id in idxs:
             ona = set(pdb_bonds) - set(ase_bonds[id])
@@ -648,6 +706,8 @@ class PDBMolecule:
         ----------
         logfile: str/pathlib.Path
             Path to the gaussian log file
+
+        # it may occur that the carbon atom types could not be matched to the correct number, e.g. CG1 in ILE has 2Hs and CG2 has 3Hs. In a radical, it can occur that both have 2 Hs. Problem: the nomenclature is different between the two, it is HG21 HG22 HG23 for CG2 and HG12 HG13 for CG1. So the Hs are not matched correctly. In this case, we just take the first H in the reference template. Thus, matching might make problems.
         """
 
         if rtp_path is None:
@@ -714,7 +774,11 @@ class PDBMolecule:
         # apply permutation to positions
         positions = np.array(positions)[:,atom_order]
         obj.xyz = Quantity(positions, unit=dist_unit).value_in_unit(angstrom)
-        
+
+        if "ILE_R" in obj.sequence:
+            if any(["HG11" in line for line in obj.pdb]):
+                raise RuntimeError("ILE_R has HG11 in the pdb file. This is not allowed. Please check the pdb file. it may occur that the carbon atom types could not be matched to the correct number, e.g. CG1 in ILE has 2Hs and CG2 has 3Hs. In a radical, it can occur that both have 2 Hs. Problem: the nomenclature is different between the two, it is HG21 HG22 HG23 for CG2 and HG12 HG13 for CG1. So the Hs are not matched correctly. In this case, we just take the first H in the reference template. Thus, matching might make problems.")
+            
         return obj
 
     @classmethod

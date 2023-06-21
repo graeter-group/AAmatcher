@@ -33,8 +33,11 @@ from openmm.app import Simulation
 from openmm.app import ForceField
 
 from openmm.unit import Quantity
-from . import units
+from PDBData import units
 import copy
+from PDBData.utils import find_radical
+
+from PDBData.utils import utils
 
 # simulation specs, only dummies for force and energy calculation
 TEMPERATURE = 350 * unit.kelvin
@@ -51,29 +54,53 @@ def add_radical_residues(forcefield, topology):
     For each residue that is not matched to a template, add a template with the same atoms but with the Hs removed.
     NOTE: This might cause issues for histidin if the histidin type cannot be determined due to the missing Hs.
     """
-    [templates, residues] = forcefield.generateTemplatesForUnmatchedResidues(topology)
+
+    forcefield = copy.deepcopy(forcefield)
+
+    # effectively delete the residues that can be mistaken with radicals:
+    # LYN and CYM
+    ######################
+    try:
+        matches = forcefield.getMatchingTemplates(topology)
+    except ValueError:
+        # this happens when there are no matched residues
+        matches = None
+    
+    if not matches is None:
+        for (residue, match) in zip(topology.residues(), matches):
+            if match.name in find_radical.generate_unmatched_templates.corrections.keys():
+                match.name = ""
+    ######################
+
+    [templates, residues] = find_radical.generate_unmatched_templates(topology=topology, forcefield=forcefield)
+
     for t_idx, template in enumerate(templates):
-        ref_template = forcefield._templates[template.name]
+        resname = template.name
+        if resname == "HIS":
+            resname = "HIE"
+        ref_template = forcefield._templates[resname]
         # the atom names stored in the template of the residue
         ref_names = [a.name for a in ref_template.atoms]
+        ref_names = [utils.one_atom_replace_h23_to_h12(n, resname=resname) for n in ref_names]
 
-        # delete the H indices since the Hs are not distinguishable anyways
-        # in the template, the Hs are named HB2 and HB3 while in some pdb files they are named HB1 and HB2
-        for i, n in enumerate(ref_names):
-            if n[0] == 'H' and len(n) == 3:
-                ref_names[i] = n[:-1]
 
         for atom in template.atoms:
             name = atom.name
-            if name[0] == 'H' and len(name) == 3:
-                name = name[:-1]
 
             # find the atom with that name in the reference template
-            atom.type = ref_template.atoms[ref_names.index(name)].type
+            try:
+                ref_idx = ref_names.index(name)
+            except ValueError:
+                print(f"Atom {name} not found in reference template {ref_names}")
+                raise
+            atom.type = ref_template.atoms[ref_idx].type
 
         # create a new template
         template.name = template.name +f"_rad_{t_idx}"
         forcefield.registerResidueTemplate(template)
+
+    for res in find_radical.generate_unmatched_templates.corrections.keys():
+        forcefield._templates.pop(res)
 
     return forcefield
 

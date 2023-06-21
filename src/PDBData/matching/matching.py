@@ -89,10 +89,21 @@ def get_radref(filename:Union[str,Path], rtp_path:Union[str,Path], cap:bool=True
     # infer radical atom from filename
     heavy_name = match_utils.radname_from_log(filename)
     # infer AA from filename
-    assert len(seq) == 3, f"length of sequence {seq} is not 3, but must be for radicals as of now."
-    rad_AA = seq[1]
-    assert rad_AA.endswith('_R'), f"second residue in sequence {seq} is not a radical, but must be for radicals as of now."
+    rad_AAs = []
+    for aa in seq:
+        if aa.endswith('_R'):
+            rad_AAs.append(aa)
+
+    if len(rad_AAs) > 1:
+        raise ValueError(f"More than one radical residue in sequence {seq}. This is not supported yet.")
+    
+    rad_AA = rad_AAs[0]
     rad_AA = rad_AA[:-2]
+
+    radAA_atom_names = [atom[0] for atom in AAs_reference[rad_AA]['atoms']]
+    if not heavy_name in radAA_atom_names:
+        raise ValueError(f"Could not find radical atom {heavy_name} in residue {rad_AA},\nheavy name prediction is false, filename stem is: {filename.stem},\nff reference is {radAA_atom_names}")
+
     rad_reference = generate_radical_reference(AAs_reference=AAs_reference, AA=rad_AA, heavy_name=heavy_name, log=False)
 
     return rad_reference, seq
@@ -106,6 +117,7 @@ def generate_radical_reference(AAs_reference: dict, AA: str, heavy_name: str, lo
         logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
         logging.info(f"--- Generating radical reference entry for residue {AA} with a {heavy_name} radical ---")
     ## search for hydrogen attached to radical
+    rmv_H = None
     for bond in AAs_reference[AA]['bonds'][::-1]:
         bond_atoms = bond
         if heavy_name in bond_atoms:
@@ -114,6 +126,9 @@ def generate_radical_reference(AAs_reference: dict, AA: str, heavy_name: str, lo
             if heavy_partner.startswith('H'):
                 rmv_H = heavy_partner
                 break
+
+    if rmv_H is None:
+        raise ValueError(f"Could not find hydrogen attached to radical {heavy_name} in residue {AA}!")
 
     AAs_reference[AA + '_R'] = copy.deepcopy(AAs_reference[AA])
     for atom in AAs_reference[AA + '_R']['atoms']:
@@ -206,7 +221,8 @@ def match_residue(i:int, res:str, mol_ref, mol, log:bool=False):
                     if log:
                         logging.debug(AL.atoms[n1.index(key)].idx,mapdict)
                     mapdict[AL.atoms[n1.index(key)].idx] = AL_ref.atoms[n2.index(key)].idx
-
+    AA_remainder = []
+    AA_refremainder = []
     rmapdict = dict(map(reversed, mapdict.items()))
     if len(mapdict.keys()) < len(AL):
         AA_remainder = sorted(list(set(AL.idxs)-set(mapdict.keys())))
