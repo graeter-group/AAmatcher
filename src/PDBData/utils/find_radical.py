@@ -56,7 +56,7 @@ generate_unmatched_templates.corrections = {"LYN":"LYS", "CYM":"CYS"}
 
 def get_radicals(topology:topology, forcefield:ForceField=ForceField("amber99sbildn.xml")):
     """
-    Returns the indices of the residues in which radicals occur and  as residue_indices, radical_names: List[int], List[str]
+    Returns the indices of the residues in which radicals occur and  as radical_indices, radical_names, residue_indices: List[int], List[str], List[int]
 
     Find the radicals in a topology. Do this using the generate_missing... method from openmm forcefields. then collect all atoms names to find the missing name. then figure out to which atom this H is connected. this way we might not be able to differentiate between charge and radical, but for standard cases it should work.
     NOTE: currently only works for one radical per residue, i.e. one missing hydrogen per residue.
@@ -65,6 +65,7 @@ def get_radicals(topology:topology, forcefield:ForceField=ForceField("amber99sbi
     
     residue_indices = []
     radical_names = []
+    radical_indices = []
 
     [templates, residues] = generate_unmatched_templates(topology=topology, forcefield=forcefield)
 
@@ -120,9 +121,19 @@ def get_radicals(topology:topology, forcefield:ForceField=ForceField("amber99sbi
                 radname = utils.one_atom_replace_h23_to_h12(name=radname, resname=resname)
                 radical_names.append(radname)
                 residue_indices.append(residues[t_idx].index)
+                # find the index of the radical in the topology
+                rad_idx_in_top = None
+                for atom in residues[t_idx].atoms():
+                    if atom.name == radname:
+                        rad_idx_in_top = atom.index
+                        break
+                if rad_idx_in_top is None:
+                    raise ValueError(f"Could not find the radical {radname} in the topology residue {residues[t_idx].index}.")
+
+                radical_indices.append(rad_idx_in_top)
                 break
 
-    return residue_indices, radical_names
+    return radical_indices, radical_names, residue_indices
 
 
 #%%

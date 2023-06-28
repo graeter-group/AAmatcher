@@ -51,10 +51,11 @@ def classify_leu(subgraph):
 # get_residue: function that maps graph to residue string
 def write_residues(g, get_residue=get_residue):
 
-    hash_storage = str(Path(__file__).parent/Path("scripts/hashed_residues.json"))
-    if os.path.exists(hash_storage):
-        with open(hash_storage, "r") as f:
-            hashed_residues = json.load(f)
+    if write_residues.hashed_residues is None:
+        hash_storage = str(Path(__file__).parent/Path("scripts/hashed_residues.json"))
+        if os.path.exists(hash_storage):
+            with open(hash_storage, "r") as f:
+                write_residues.hashed_residues = json.load(f)
 
     res_counter = 0
 
@@ -128,7 +129,7 @@ def write_residues(g, get_residue=get_residue):
 
         # predict residue
         try:
-            residue = get_residue(res_subgraph, hashed_residues=hashed_residues)
+            residue = get_residue(res_subgraph, hashed_residues=write_residues.hashed_residues)
         except:
             if not DEBUG:
                 raise
@@ -171,7 +172,7 @@ def write_residues(g, get_residue=get_residue):
             cap = all_cap_graph.ndata["old_node_id"][cap].type(torch.int32)
 
             try:
-                residue = get_residue(dgl.node_subgraph(g, cap), hashed_residues=hashed_residues)
+                residue = get_residue(dgl.node_subgraph(g, cap), hashed_residues=write_residues.hashed_residues)
             except:
                 if not DEBUG:
                     raise
@@ -196,6 +197,7 @@ def write_residues(g, get_residue=get_residue):
             g.ndata["res_number"][cap.long()] = torch.ones(len(cap))*res_number
 
     return g
+write_residues.hashed_residues = None
 #%%
 
 # returns an ordered list of c alphas. the ordering is starting at the C terminus and ending at the N terminus.

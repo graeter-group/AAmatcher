@@ -83,6 +83,13 @@ def add_radical_residues(forcefield, topology):
         ref_names = [a.name for a in ref_template.atoms]
         ref_names = [utils.one_atom_replace_h23_to_h12(n, resname=resname) for n in ref_names]
 
+        # check whether all atoms can be matched:
+        atom_names = [a.name for a in template.atoms]
+        diff1 = set(atom_names) - set(ref_names)
+        diff2 = set(ref_names) - set(atom_names)
+        if len(diff2) > 2 or len(diff1) > 0:
+            raise ValueError(f"Template {template.name} does not match reference template:\nIn pdb, not in reference: {diff1}\nIn reference, not in pdb:{diff2},\nallowed is at most one Hydrogen atom that is not in the pdb and no atom that is not in the reference.")
+            
 
         for atom in template.atoms:
             name = atom.name
@@ -91,7 +98,7 @@ def add_radical_residues(forcefield, topology):
             try:
                 ref_idx = ref_names.index(name)
             except ValueError:
-                print(f"Atom {name} not found in reference template {ref_names}")
+                print(f"Atom {name} not found in reference template {template.name}: {ref_names}")
                 raise
             atom.type = ref_template.atoms[ref_idx].type
 
@@ -119,7 +126,7 @@ def add_radical_residues(forcefield, topology):
 # get_charges is a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology
 def parametrize_amber(g, topology, forcefield=ForceField('amber99sbildn.xml'), n_max_periodicities=6, suffix="_amber99sbildn",
 parameters=["charge", "LJ", "bond", "angle", "torsion", "residue"],
-energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "total", "bonded"], forces=True, write_data=True, get_charges=None, charge_suffix=None, openffmol=None, allow_radicals=False):
+energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "total", "bonded"], forces=True, calc_energies=True, get_charges=None, charge_suffix=None, openffmol=None, allow_radicals=False):
     """
     get_charges: Function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
     if not openffmol is None, get_charge can also take an openffmolecule instead.
@@ -134,12 +141,15 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
     if charge_suffix is None:
         charge_suffix = suffix
 
+    # will get modified in-place by get_charges
+    radical_indices = []
+
     manual_charges = None
     if not get_charges is None:
         if not openffmol is None:
-            manual_charges = get_charges(openffmol)
+            manual_charges = get_charges(openffmol, radical_indices=radical_indices)
         else:
-            manual_charges = get_charges(topology)
+            manual_charges = get_charges(topology, radical_indices=radical_indices)
         manual_charges = torch.tensor([c.value_in_unit(units.CHARGE_UNIT) for c in manual_charges], dtype=torch.float32)
 
 
@@ -211,10 +221,18 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
             g.nodes["n1"].data["residue"] = torch.zeros(
                         len(atom_lookup.keys()), len(RESIDUES), dtype=torch.float32,
                     )
+            
+            g.nodes["n1"].data["is_radical"] = torch.zeros(
+                        len(atom_lookup.keys()), 1, dtype=torch.float32,
+                    )
 
-            for idx, atom in enumerate(topology.atoms()):
+        for idx, atom in enumerate(topology.atoms()):
 
-                position = atom_lookup[idx]
+            position = atom_lookup[idx]
+            if idx in radical_indices:
+                g.nodes["n1"].data["is_radical"][position] = 1.
+
+            if "residue" in parameters:
                 residue = atom.residue.name
 
                 if residue in RESIDUES:
@@ -406,7 +424,7 @@ energies=["charge", "LJ", "bond", "angle", "torsion", "improper", "nonbonded", "
 
     # PARAMETRISATION END
 
-    if not write_data:
+    if not calc_energies:
         return g
 
     if not len(energies) == 0 and "xyz" in g.nodes["n1"].data.keys():

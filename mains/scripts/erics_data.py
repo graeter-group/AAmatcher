@@ -1,4 +1,6 @@
 #%%
+from PDBData.xyz2res.constants import RESIDUES
+
 store = True
 
 from PDBData.PDBDataset import PDBDataset
@@ -17,7 +19,7 @@ storepath = "/hits/fast/mbm/seutelf/data/datasets/PDBDatasets"
 #%%
 
 overwrite = True
-n_max = 20
+n_max = None
 
 MAX_ENERGY = 200
 MAX_FORCE = 400
@@ -46,10 +48,11 @@ for pathname in [
         # INIT
         try:
             mol = PDBMolecule.from_gaussian_log_rad(p, e_unit=kilocalorie_per_mole*23.0609, dist_unit=angstrom, force_unit=kilocalorie_per_mole*23.0609/angstrom)
+            mol.name = p.stem
         except KeyboardInterrupt:
             raise
         except Exception as e:
-            if not any([skip_res in str(p) for skip_res in ["Glu", "Asp", "Ile", "Trp", "NmeCH3", "Nme", "Hie", "AceCH3", "Hyp", "Dop", "Nala"]]):
+            if not any([skip_res in str(p) for skip_res in ["Glu", "Asp", "Ile", "Trp", "NmeCH3", "Nme", "Hie", "AceCH3", "Nala"]]):
                 # unexpected fail!
                 unexpected_fails[str(p)] = str(e)
             else:
@@ -73,7 +76,7 @@ for pathname in [
         # PARAMETRIZE CHECK
         try:
             mol_copy = copy.deepcopy(mol)
-            mol_copy.parametrize(allow_radicals=True, get_charges=model_from_dict(tag="bmk"))
+            mol_copy.parametrize(allow_radicals=True, get_charges=model_from_dict(tag="heavy"), collagen=True)
         except KeyboardInterrupt:
             raise
         except Exception as e:
@@ -98,14 +101,29 @@ for pathname in [
                 break
 
     print(f"Finished {pathname} with {counter} molecules.")
-    print(f"  {len(expected_fails)} expected fails.")
-    print(f"  {len(unexpected_fails)} unexpected fails.")
-    print(f"  {len(bond_check_fails)} bond check fails.")
     print()
     print(f"expected fails:\n{json.dumps(expected_fails, indent=4)}\n")
     print(f"bond check fails:\n{json.dumps(bond_check_fails, indent=4)}\n")
     print(f"unexpected fails:\n{json.dumps(unexpected_fails, indent=4)}\n\n")
+    print()
+    print(f"  {len(expected_fails)} expected fails.")
+    print(f"  {len(unexpected_fails)} unexpected fails.")
+    print(f"  {len(bond_check_fails)} bond check fails.")
 
+    residue_count = {res:0 for res in RESIDUES}
+    # count how often which residue appeared:
+    for mol in ds:
+        for res in RESIDUES:
+            if res in mol.name.upper():
+                residue_count[res] += 1
+
+    # visualize the residue counts in the console using # signs normalized to 20 for the most common residue
+    max_count = max(residue_count.values())
+    print("Residue counts:")
+    for res, count in residue_count.items():
+        print(f"  {res}: {'#'*int(count/max_count*20)} {count} ")
+
+    print()
 
     if store:
         ds.save_npz(Path(storepath)/Path(pathname)/Path("base"), overwrite=True)
@@ -120,14 +138,15 @@ if not do_scatter:
 #%%
 # p = Path(storepath)/Path("spice/base")
 p = Path(storepath)/Path("AA_scan_nat/base")
+p = Path(storepath)/Path("AA_opt_nat/base")
 p = Path(storepath)/Path("AA_opt_rad/base")
 p = Path(storepath)/Path("AA_scan_rad/base")
-p = Path(storepath)/Path("AA_opt_nat/base")
+#%%
 
 ds = PDBDataset.load_npz(p)
 # ds = PDBDataset.load_npz(p, n_max=20)
-ds.filter_confs(max_energy=60)
-ds.parametrize(allow_radicals=True, get_charges=model_from_dict(tag="bmk"))
+# ds.filter_confs(max_energy=60)
+ds.parametrize(allow_radicals=True, get_charges=model_from_dict(tag="heavy"), collagen=True)
 #%%
 graphs = ds.to_dgl()
 
@@ -149,6 +168,7 @@ for g in graphs:
     r -= r.mean()
     energies = np.concatenate([energies, e], axis=0)
     ff_energies = np.concatenate([ff_energies, r], axis=0)
+ff_energies
 #%%
 energies = energies.flatten()
 ff_energies = ff_energies.flatten()

@@ -12,7 +12,7 @@ def get_espaloma_charge_model():
     from espaloma_charge.openff_wrapper import EspalomaChargeToolkitWrapper
     toolkit_registry = EspalomaChargeToolkitWrapper()
 
-    def get_charges(top:Molecule):
+    def get_charges(top:Molecule, radical_indices=None):
         top.assign_partial_charges('espaloma-am1bcc', toolkit_registry=toolkit_registry)
         # convert to openmm quantity
         with warnings.catch_warnings(): # catch a warning given by espaloma charge because the openff molecule has a conformation

@@ -16,7 +16,8 @@ import os
 from PDBData.xyz2res.constants import MAX_ELEMENT, RESIDUES
 
 
-def make_train_set(name:str='pdbs', path:str=str(Path("data/pdbs"))):
+
+def make_train_set(name:str='pdbs', path:str=str(Path("data/pdbs")), collagen=True):
     """
     Run with arguments:
         '-p', '--path'
@@ -41,6 +42,9 @@ def make_train_set(name:str='pdbs', path:str=str(Path("data/pdbs"))):
     labels = [] # store unique (random) integers to store them in the graph
     name_dict={} # map integers to names
 
+    if collagen:
+        from PDBData.classical_ff.collagen_utility import add_bonds
+
     # %%
     counter = 0
     counter
@@ -55,6 +59,8 @@ def make_train_set(name:str='pdbs', path:str=str(Path("data/pdbs"))):
         counter += 1
         try:
             mol = PDBFile(str(filename))
+            if collagen:
+                mol.topology = add_bonds(mol.topology)
             atom_numbers = []
             residues = []
             res_indices = []
@@ -173,3 +179,7 @@ if __name__=="__main__":
     name = args.name
 
     make_train_set(name=name, path=path)
+    
+    # generate the pep-1 dataset for the residue hashes:
+    print("generating pep-1 dataset for residue hashes")
+    make_train_set(path="data/pdbs/pep1", name="pep1")

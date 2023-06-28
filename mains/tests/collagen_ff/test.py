@@ -21,8 +21,9 @@ import copy
 from pathlib import Path
 
 # %%
-ds = PDBDataset.load_npz("/hits/fast/mbm/seutelf/data/datasets/PDBDatasets/spice/base", n_max=300)
+ds = PDBDataset.load_npz("/hits/fast/mbm/seutelf/data/datasets/PDBDatasets/spice/base", n_max=20)
 ff2 = ForceField("amber99sbildn.xml")
+print(*ds[0].pdb)
 
 def get_energies(ds, ff="amber99sbildn.xml", component="u_total", lvl="g"):
     ds.filter_confs(50)

@@ -6,7 +6,7 @@ from PDBData.xyz2res.deploy import xyz2res
 from pathlib import Path
 import tempfile
 from openmm.app import PDBFile, ForceField
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Dict, Callable
 from dgl import graph, add_reverse_edges
 from openmm.unit import angstrom, unit, kilocalorie_per_mole, Quantity, hartrees, bohr
 import ase
@@ -14,10 +14,10 @@ import numpy as np
 from PDBData.matching import matching
 import torch
 from PDBData.utils import utilities, utils, draw_mol
-from PDBData.classical_ff import parametrize
+from PDBData.classical_ff import parametrize, collagen_utility
+
 import math
 from PDBData.matching import match_utils
-from PDBData.classical_ff import collagen_utility
 
 # supress openff warning:
 import logging
@@ -58,7 +58,7 @@ class PDBMolecule:
         This stores information on connectivity and atom types of the molecule, not the on the conformations.
 
     sequence: str
-        String of threeletter amino acid codes representing the sequence of the molecule. Separated by '-', capitalized and including caps.
+        String of threeletter amino acid codes representing the sequence of the molecule. Separated by '-', capitalized and including cap residues.
 
     residues: np.ndarray
         List of strings containing the residues by atom in the order of the element member variable, only set if initialized by xyz.
@@ -105,22 +105,20 @@ class PDBMolecule:
         """
         Initializes everything to None. Use the classmethods to construct the object!
         """
-        self.xyz = None
-        self.energies = None
-        self.gradients = None
-        self.elements = None
+        self.xyz: np.ndarray = None  #: Array of shape (N_conf x N_atoms x 3) containing the atom positions.
+        self.energies: np.ndarray = None  #: Array of shape (N_conf) containing the energies in kcal/mol.
+        self.gradients: np.ndarray = None  #: Array of shape (N_conf x N_atoms x 3) containing the gradient of the energy wrt the positions.
+        self.elements: np.ndarray = None  #: Array of shape (N_atoms) containing the atomic numbers of the elements.
 
-        self.pdb = None
-        self.sequence = None
-        self.residues = None
-        self.residue_numbers = None
-        self.name = None # optional
+        self.pdb: List[str] = None  #: List of strings representing the pdb-file of some conformation.
+        self.sequence: str = None  #: String of threeletter amino acid codes representing the sequence of the molecule.
+        self.residues: np.ndarray = None  #: List of strings containing the residues by atom in the order of the element member variable, only set if initialized by xyz.
+        self.residue_numbers: np.ndarray = None  #: List of integers starting at zero and ending at len(sequence), grouping atoms to residues, only set if initialized by xyz.
+        self.name: str = None  #: Name of the molecule, by default, this is the sequence.
+        self.permutation: np.ndarray = None  #: Array of integers describing an atom permutation representing the change of order of the input atom order.
 
-        self.permutation = None
+        self.graph_data: Dict = {}  # dictionary holding all of the data in the graph, Graph data is stored by chaining dicts like this: graph_data[node_type][feat_type] = data
 
-        self.graph_data = {} # dictionary holding all of the data in the graph, Graph data is stored by chaining dicts like this: graph_data[node_type][feat_type] = data
-        # shape of data can differ from the shape of self.xyz / self.gradients but is the shape of the data stored in the actual graph.
-        
 
 
     def write_pdb(self, pdb_path:Union[str, Path]="my_pdb.pdb")->None:
@@ -167,8 +165,17 @@ class PDBMolecule:
             arrays["energies"] = self.energies
         if not self.gradients is None:
             arrays["gradients"] = self.gradients
-        arrays["permutation"] = self.permutation
-        arrays["sequence"] = np.array((self.sequence))
+        if not self.permutation is None:
+            arrays["permutation"] = self.permutation
+        if not self.sequence is None:
+            arrays["sequence"] = np.array((self.sequence))
+        if not self.name is None:
+            arrays["name"] = np.array((self.name))
+        if not self.residues is None:
+            arrays["residues"] = self.residues
+        if not self.residue_numbers is None:
+            arrays["residue_numbers"] = self.residue_numbers
+
 
         for level in self.graph_data.keys():
             for feat in self.graph_data[level].keys():
@@ -192,8 +199,16 @@ class PDBMolecule:
             obj.energies = d["energies"]
         if "gradients" in d.keys():
             obj.gradients = d["gradients"]
-        obj.permutation = d["permutation"]
-        obj.sequence = str(d["sequence"]) # assume that the entry is given as np array with one element
+        if "permutation" in d.keys():
+            obj.permutation = d["permutation"]
+        if "sequence" in d.keys():
+            obj.sequence = str(d["sequence"]) # assume that the entry is given as np array with one element
+        if "name" in d.keys():
+            obj.name = str(d["name"]) # assume that the entry is given as np array with one element
+        if "residues" in d.keys():
+            obj.residues = d["residues"]
+        if "residue_numbers" in d.keys():
+            obj.residue_numbers = d["residue_numbers"]
 
         for key in d.keys():
             if " " in key:
@@ -342,17 +357,20 @@ class PDBMolecule:
         # however, it is our standard now...
         openmm_pdb = utils.replace_h23_to_h12(openmm_pdb)
         if collagen:
-            openmm_pdb.topology = collagen_utility.add_bonds(openmm_pdb.topology)
+            openmm_pdb.topology = collagen_utility.add_bonds(openmm_pdb.topology, allow_radicals=True)
+
+        openmm_pdb.topology = utils.rename_cap_Hs(topology=openmm_pdb.topology)
         return openmm_pdb
 
 
-    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None, charge_suffix:str="_ref", ref_suffix:str="_ref", openff_charge_flag=False, allow_radicals=False, collagen=False)->None:
+    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), suffix:str="_amber99sbildn", get_charges=None, charge_suffix:str="_ref", ref_suffix:str="_ref", openff_charge_flag=False, allow_radicals=False, collagen=False, calc_energies=True)->None:
         """
         Stores the forcefield parameters and energies/gradients in the graph_data dictionary.
         get_charges is a function that takes a topology and returns a list of charges as openmm Quantities in the order of the atoms in topology.
         Also writes reference data (such as the energy/gradients minus nonbonded and which torsion coefficients are zero) to the graph.
         if not openffmol is None, get_charge can also take an openffmolecule instead.
         If the charge model taket an openff molecule as input, set openff_charge_flag to True.
+        If the collagen flag is set to True, the collagen forcefield based on amber99sbildn is used instead of the given forcefield.
         """
         g = self.to_dgl(graph_data=False)
         g.nodes["n1"].data["xyz"] = torch.tensor(self.xyz, dtype=torch.float32,).transpose(0,1)
@@ -366,16 +384,18 @@ class PDBMolecule:
         if allow_radicals and get_charges is None:
             raise RuntimeError("Radicals are not supported with forcefield charges.")
 
-        if collagen and forcefield == ForceField('amber99sbildn.xml'):
-            forcefield = ForceField('./classical_ff/collagen_ff.xml')
+        if collagen:
+            forcefield = collagen_utility.get_collagen_forcefield()
 
-        g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, topology=self.to_openmm(collagen=collagen).topology, openffmol=openffmol, allow_radicals=allow_radicals)
+        g = parametrize.parametrize_amber(g, forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, topology=self.to_openmm(collagen=collagen).topology, openffmol=openffmol, allow_radicals=allow_radicals, calc_energies=calc_energies)
 
 
-        torch_energies = None if self.energies is None else torch.tensor(self.energies, dtype=torch.float32,).unsqueeze(dim=0)
-        torch_gradients = None if self.gradients is None else torch.tensor(self.gradients, dtype=torch.float32,).transpose(0,1)
+        if calc_energies:
+            torch_energies = None if self.energies is None else torch.tensor(self.energies, dtype=torch.float32,).unsqueeze(dim=0)
+            torch_gradients = None if self.gradients is None else torch.tensor(self.gradients, dtype=torch.float32,).transpose(0,1)
 
-        g = utilities.write_reference_data(g, energies=torch_energies, gradients=torch_gradients, class_ff=suffix, ref_suffix=ref_suffix)
+            g = utilities.write_reference_data(g, energies=torch_energies, gradients=torch_gradients, class_ff=suffix, ref_suffix=ref_suffix)
+
 
         for level in g.ntypes:
             if not level in self.graph_data.keys():
@@ -402,11 +422,11 @@ class PDBMolecule:
         return bonds
         
 
-    def validate_confs(self, forcefield=ForceField("amber99sbildn.xml"))->Tuple[Tuple[float, float], Tuple[float, float]]:
+    def validate_confs(self, forcefield=ForceField("amber99sbildn.xml"), collagen:bool=False)->Tuple[Tuple[float, float], Tuple[float, float]]:
         """
         Returns the rmse between the classical force field in angstrom and kcal/mol and the stored data, and the standard deviation of the data itself.
         """
-        e_class, grad_class = self.get_ff_data(forcefield)
+        e_class, grad_class = self.get_ff_data(forcefield, collagen=collagen)
         e_class -= e_class.mean()
         en = self.energies - self.energies.mean(axis=-1)
         diffs_e = en - e_class
@@ -419,12 +439,12 @@ class PDBMolecule:
             return (np.sqrt(np.mean(diffs_e**2)), np.std(en)), (None, None)
         
 
-    def conf_check(self, forcefield=ForceField("amber99sbildn.xml"), sigmas:Tuple[float,float]=(1.,1.))->bool:
+    def conf_check(self, forcefield=ForceField("amber99sbildn.xml"), sigmas:Tuple[float,float]=(1.,1.), collagen=False)->bool:
         """
         Checks if the stored energies and gradients are consistent with the forcefield. Returns True if the energies and gradients are within var_param[0] and var_param[1] standard deviations of the stored energies/forces.
         If sigmas are 1, this corresponds to demanding that the forcefield data is better than simply always guessing the mean.
         """
-        (rmse_e, std_e), (rmse_g, std_g) = self.validate_confs(forcefield)
+        (rmse_e, std_e), (rmse_g, std_g) = self.validate_confs(forcefield, collagen=collagen)
         if not self.gradients is None:
             return rmse_e < sigmas[0]*std_e and rmse_g < sigmas[1]*std_g
         else:
@@ -470,8 +490,9 @@ class PDBMolecule:
             force_mask = np.ones(len(self), dtype=bool)
 
         mask = energy_mask * force_mask
-        assert mask.shape[0] == 1, "mask should be of shape (1,n_confs), i.e. batching is disabled"
-        mask = mask[0]
+        if reference:
+            assert mask.shape[0] == 1, f"mask should be of shape (1,n_confs), i.e. batching is disabled, shape is {mask.shape}"
+            mask = mask[0]
         # apply mask
         try:
             if not self.energies is None:
@@ -578,8 +599,7 @@ class PDBMolecule:
         Initializes the object from a pdb file and an xyz array of shape (N_confsxN_atomsx3). Units must be the ones specified for the class. The atom order is the same as in the pdb file.
         """
 
-        if type(pdbpath) == Path:
-            pdbpath = str(pdbpath)
+        pdbpath = str(pdbpath)
 
         for l, to_be_checked, name in [(1,energies, "energies"), (3,gradients,"gradients")]:
             if not to_be_checked is None:
@@ -626,15 +646,14 @@ class PDBMolecule:
         if rtp_path is None:
             rtp_path = PDBMolecule.DEFAULT_RTP
 
-        if type(rtp_path) == str:
-            rtp_path = Path(rtp_path)
+
+        rtp_path = Path(rtp_path)
 
         obj = cls()
 
         AAs_reference = matching.read_rtp(rtp_path)
 
-        if type(logfile) == str:
-            logfile = Path(logfile)
+        logfile = Path(logfile)
 
         if sequence is None:
             sequence = matching.seq_from_filename(logfile, AAs_reference, cap)
@@ -805,8 +824,8 @@ class PDBMolecule:
 
         if rtp_path is None:
             rtp_path = PDBMolecule.DEFAULT_RTP
-        if type(rtp_path) == str:
-            rtp_path = Path(rtp_path)
+
+        rtp_path = Path(rtp_path)
 
         obj = cls()
         
@@ -950,7 +969,7 @@ class PDBMolecule:
         
 
 
-    def get_ff_data(self, forcefield:ForceField=ForceField('amber99sbildn.xml'))->Tuple[np.ndarray, np.ndarray]:
+    def get_ff_data(self, forcefield:ForceField=ForceField('amber99sbildn.xml'), collagen:bool=False)->Tuple[np.ndarray, np.ndarray]:
         """
         Returns energies, gradients that are calculated by the forcefield for all states xyz. Tha state axis is the zeroth axis.
         """
@@ -966,7 +985,10 @@ class PDBMolecule:
             path = os.path.join(tmp, 'pep.pdb')
             self.write_pdb(path)
             gen_pdb = PDBFile(path)
-        gen_pdb = self.to_openmm()
+        
+        gen_pdb = self.to_openmm(collagen=collagen)
+        if collagen:
+            forcefield = collagen_utility.get_collagen_forcefield()
 
         integrator = LangevinMiddleIntegrator(300*kelvin, 1/picosecond, 0.5*femtoseconds)
         system = forcefield.createSystem(gen_pdb.topology)
@@ -1058,22 +1080,25 @@ class PDBMolecule:
 
                 
 
-    @staticmethod
-    def energy_check(pdb:PDBFile, seed:int=0, permute:bool=True, n_conf:int=5, forcefield:ForceField=ForceField('amber99sbildn.xml'), accuracy:List[float]=[0.1, 1.], store_energies_ptr:list=None)->bool:
+    def energy_check(self, pdb:PDBFile=None, seed:int=0, permute:bool=True, n_conf:int=5, forcefield:ForceField=ForceField('amber99sbildn.xml'), accuracy:List[float]=[0.1, 1.], store_energies_ptr:list=None, collagen=False)->bool:
         """
-        Create a set of configurations using openmm, then shuffle positions, elements and forces, create a PDBMolecule and use openmm to calculate the energies and forces belonging to the (re-ordered) positions of the mol, and compare these elementwise. Returns false if the energies deviate strongly.
+        Create a set of configurations using openmm, then shuffle positions, elements and forces, create a PDBMolecule from the xyz and elements alone and use openmm to calculate the energies and forces belonging to the (re-ordered) positions of the mol, and compare these elementwise. Returns false if the energies deviate strongly.
+        This can be used as static method applied to an uninitialised class object by specifying the pdb file, or as a method of a PDBMolecule object.
         accuracy: the maximum allowed deviations in kcal/mol and kcal/mol/angstrom
         """
+        if pdb is None:
+            pdb = self.to_openmm(collagen=collagen)
         from openmm.app import ForceField, PDBFile, topology, Simulation, PDBReporter, PME, HBonds, NoCutoff, CutoffNonPeriodic
         from openmm import LangevinMiddleIntegrator, Vec3
         from openmm.unit import Quantity, picosecond, kelvin, kilocalorie_per_mole, picoseconds, angstrom, nanometer, femtoseconds, newton
 
+        if collagen:
+            forcefield = collagen_utility.get_collagen_forcefield()
 
         # generate a dataset
 
         integrator = LangevinMiddleIntegrator(500*kelvin, 1/picosecond, 0.5*femtoseconds)
 
-        forcefield=ForceField('amber99sbildn.xml')
         system = forcefield.createSystem(pdb.topology)
 
         simulation = Simulation(
@@ -1123,7 +1148,7 @@ class PDBMolecule:
      # generate a pdb molecule with our package
         mol = PDBMolecule.from_xyz(xyz=xyz, elements=elements, energies=amber_e, gradients=-amber_f)
 
-        new_energies, new_grad = mol.get_ff_data(forcefield=forcefield)
+        new_energies, new_grad = mol.get_ff_data(forcefield=forcefield, collagen=collagen)
 
         emse, fmse = np.sum((new_energies - mol.energies)**2)/len(new_energies), np.sum((new_grad - mol.gradients)**2)/len(new_grad)
 

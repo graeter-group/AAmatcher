@@ -12,6 +12,7 @@ from pathlib import Path
 from PDBData.charge_models.esp_charge import get_espaloma_charge_model
 from PDBData.utils.find_radical import get_radicals
 from PDBData.utils.utils import replace_h23_to_h12
+from PDBData.classical_ff.collagen_utility import get_collagen_forcefield
 #%%
 
 
@@ -56,15 +57,15 @@ def model_from_dict(tag:str=None, d_path:Union[str, Path]=None):
             if not key in d.keys():
                 d[key] = ref[key]
 
-    def get_charges(top:topology):
-        return from_dict(d=d, top=top, d_rad=d_rad)
+    def get_charges(top:topology, radical_indices:List[int]=[]):
+        return from_dict(d=d, top=top, d_rad=d_rad, radical_indices=radical_indices)
     
     return get_charges
 
 
 def randomize_model(get_charges, noise_level:float=0.1):
-    def get_random_charges(top):
-        charges = get_charges(top)
+    def get_random_charges(top, radical_indices=[]):
+        charges = get_charges(top, radical_indices=radical_indices)
         unit = charges[0].unit
         charges = np.array([q.value_in_unit(unit) for q in charges])
         charge = np.sum(charges)
@@ -80,13 +81,15 @@ def randomize_model(get_charges, noise_level:float=0.1):
     return get_random_charges
 
 
-def from_dict(d:dict, top:topology, d_rad:dict=None, charge_unit=unit.elementary_charge):
+def from_dict(d:dict, top:topology, d_rad:dict=None, charge_unit=unit.elementary_charge, radical_indices:List[int]=[]):
     charges = []
-    rad_indices, rad_names = get_radicals(topology=top)
+    # replace _radical_indices in-place
 
-    assert len(set(rad_indices)) == len(rad_indices), f"radical indices are not unique: {rad_indices}"
+    radical_indices[:], rad_names, res_radical_indices = get_radicals(topology=top, forcefield=get_collagen_forcefield())
 
-    if len(rad_indices) != 0 and d_rad is None:
+    assert len(set(res_radical_indices)) == len(res_radical_indices), f"radical indices are not unique: {res_radical_indices}. this might be due to a residue in which two radicals occur."
+
+    if len(res_radical_indices) != 0 and d_rad is None:
         raise ValueError("radical indices are given but no radical dictionary is given")
 
 
@@ -96,8 +99,8 @@ def from_dict(d:dict, top:topology, d_rad:dict=None, charge_unit=unit.elementary
 
         num_atoms = len([a for a in atom.residue.atoms()])
 
-        if res_idx in rad_indices:
-            rad_name = rad_names[rad_indices.index(res_idx)]
+        if res_idx in res_radical_indices:
+            rad_name = rad_names[res_radical_indices.index(res_idx)]
 
 
         # IF ID IN RADICAL INDICES, DICT IS GIVEN BY THE RAD NAME
@@ -147,7 +150,7 @@ def from_dict(d:dict, top:topology, d_rad:dict=None, charge_unit=unit.elementary
         charge = float(d[res][name]) if rad_name is None else float(d_rad[res][rad_name][name])
 
         if len((d[res] if rad_name is None else d_rad[res][rad_name]).keys()) != num_atoms:
-            raise RuntimeError(f"Residue {res} has {num_atoms} atoms, but dictionary has {len((d[res] if rad_name is None else d_rad[res][rad_name]).keys())} atoms.\ndictionary entries: {(d[res] if rad_name is None else d_rad[res][rad_name]).keys()},\natom names: {[a.name for a in atom.residue.atoms()]},\nrad name is {rad_name},\nres_idx is {res_idx}, \nrad_indices are {rad_indices},\nrad_names are {rad_names}")
+            raise RuntimeError(f"Residue {res} has {num_atoms} atoms, but dictionary has {len((d[res] if rad_name is None else d_rad[res][rad_name]).keys())} atoms.\ndictionary entries: {(d[res] if rad_name is None else d_rad[res][rad_name]).keys()},\natom names: {[a.name for a in atom.residue.atoms()]},\nrad name is {rad_name},\nres_idx is {res_idx}, \nres_radical_indices are {res_radical_indices},\nrad_names are {rad_names}")
 
         charge = openmm.unit.Quantity(charge, charge_unit)
         charges.append(charge)
@@ -174,7 +177,7 @@ if __name__=="__main__":
         charges = get_charges_bmk(top)
         print(charges)
     #%%
-    ds.parametrize(get_charges=get_charges_bmk, suffix="_bmk")
+    ds.parametrize(get_charges=get_charges_bmk, suffix="_bmk", charge_suffix="_bmk")
     #%%
     i = 0
     g = ds[i].to_dgl()
@@ -185,30 +188,40 @@ if __name__=="__main__":
     ds2.parametrize()
     #%%
     g = ds2[i].to_dgl()
-    print(g.nodes["n1"].data["q_amber99sbildn"])
+    print(g.nodes["n1"].data["q_ref"])
     #%%
     ds3 = copy.deepcopy(ds)
     ds3.parametrize(get_charges=model_from_dict("amber99sbildn"))
     g = ds3[i].to_dgl()
-    print(g.nodes["n1"].data["q_amber99sbildn"])
+    print(g.nodes["n1"].data["q_ref"])
     #%%
+    #############################
+    # TEST RADICALS
     from PDBData.PDBMolecule import PDBMolecule
     rad = PDBMolecule.from_pdb("./../../../mains/tests/radicals/F_radA.pdb")
     mol = PDBMolecule.from_pdb("./../../../mains/tests/radicals/F.pdb")
     fail_rad = PDBMolecule.from_pdb("./../../../mains/tests/radicals/F_rad.pdb")
     # print(*mol.pdb)
-    # print(*rad.pdb)
-    charges = get_charges_bmk(rad.to_openmm().topology)
+    print(*rad.pdb)
+    radical_indices = []
+    charges = get_charges_bmk(rad.to_openmm().topology, radical_indices=radical_indices)
     # print(charges)
     ds = PDBDataset()
     ds.mols = [rad, mol]
+    # rad indices gets modified in-place
+    radical_indices
     #%%
-    ds.parametrize(get_charges=get_charges_bmk, allow_radicals=True, suffix="_bmk")
+
+    #%%
+    ds.parametrize(get_charges=get_charges_bmk, allow_radicals=True, suffix="_bmk", charge_suffix="_bmk")
+    #%%
     #%%
     g_rad = ds[0].to_dgl()
     g_mol = ds[1].to_dgl()
     print(g_rad.nodes["n1"].data["q_bmk"])
     print(g_mol.nodes["n1"].data["q_bmk"])
+    #%%
+    print(g_rad.nodes["n1"].data["is_radical"])
     #%%
     # print both charges next to each other:
     mol_atoms = [a for a in mol.to_openmm().topology.atoms()]
@@ -230,5 +243,7 @@ if __name__=="__main__":
 
 
     # %%
+
+# %%
 
 # %%

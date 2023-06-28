@@ -138,7 +138,7 @@ class PDBDataset:
 
 
     
-    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'),suffix:str="_amber99sbildn", get_charges=None, charge_suffix="_ref", openff_charge_flag:bool=False, allow_radicals:bool=False)->None:
+    def parametrize(self, forcefield:ForceField=ForceField('amber99sbildn.xml'),suffix:str="_amber99sbildn", get_charges=None, charge_suffix="_ref", openff_charge_flag:bool=False, allow_radicals:bool=False, collagen:bool=False, calc_energies=True)->None:
         """
         Parametrizes the dataset with a forcefield.
         Writes the following entries to the graph:
@@ -153,7 +153,7 @@ class PDBDataset:
             if self.info:
                 print(f"parametrizing {i+1}/{len(self.mols)}", end="\r")
             try:
-                mol.parametrize(forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, openff_charge_flag=openff_charge_flag, allow_radicals=allow_radicals)
+                mol.parametrize(forcefield=forcefield, suffix=suffix, get_charges=get_charges, charge_suffix=charge_suffix, openff_charge_flag=openff_charge_flag, allow_radicals=allow_radicals, collagen=collagen, calc_energies=calc_energies)
             except Exception as e:
                 raise type(e)(str(e) + f" in molecule {mol.sequence}")
         if self.info:

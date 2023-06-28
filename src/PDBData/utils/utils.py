@@ -88,6 +88,9 @@ def replace_h23_to_h12(pdb:PDBFile):
 
     return pdb
 
+replace_h23_to_h12.d = {"CYS":["B"], "ASP":["B"], "GLU":["B","G"], "PHE":["B"], "GLY":["A"], "HIS":["B"], "HIE":["B"], "LYS":["B","G","D","E"], "LEU":["B"], "MET":["B","G"], "ASN":["B"], "PRO":["B","G","D"], "GLN":["B", "G"], "ARG":["B","G","D"], "SER":["B"], "TRP":["B"], "TYR":["B"]}
+
+
 def one_atom_replace_h23_to_h12(name:str, resname:str):
     """
     for one atom, apply the mapping of Hs (2,3) -> (2,3), eg HB2, HB3 -> HB2, HB1.
@@ -110,7 +113,6 @@ def in_list_replace_h23_to_h12(names:List[str], resname:str):
     return names
 
 
-replace_h23_to_h12.d = {"CYS":["B"], "ASP":["B"], "GLU":["B","G"], "PHE":["B"], "GLY":["A"], "HIS":["B"], "HIE":["B"], "LYS":["B","G","D","E"], "LEU":["B"], "MET":["B","G"], "ASN":["B"], "PRO":["B","G","D"], "GLN":["B", "G"], "ARG":["B","G","D"], "SER":["B"], "TRP":["B"], "TYR":["B"]}
 
 
 def replace_h12_to_h23(topology):
@@ -190,3 +192,16 @@ assign_standard_charge.charge_dict = {
     "HIS":1,
     "HIE":1
     }
+
+def rename_cap_Hs(topology:openmm.app.topology.Topology)->openmm.app.topology.Topology:
+    # rename the Hs of the cap atoms if necessary: (we adopt the convention to name them HH31, HH32, HH33 for backwards compatibility):
+    for res in topology.residues():
+        if res.name in ["ACE", "NME"]:
+            for atom in res.atoms():
+                if atom.name == "H3":
+                    atom.name = "HH31"
+                elif atom.name == "H2":
+                    atom.name = "HH32"
+                elif atom.name == "H1":
+                    atom.name = "HH33"
+    return topology
