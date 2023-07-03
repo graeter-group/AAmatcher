@@ -9,7 +9,7 @@ if __name__=="__main__":
     ds = PDBDataset.from_spice(dipeppath, info=True, n_max=None)
 
     # remove conformations with energy > 200 kcal/mol from min energy in ds[i]
-    ds.filter_confs(max_energy=200) # remove crashed conformations
+    ds.filter_confs(max_energy=200, max_force=500) # remove crashed conformations
 
     ds.save_npz(storepath, overwrite=True)
     ds.save_dgl(str(storepath)+"_dgl.bin", overwrite=True)

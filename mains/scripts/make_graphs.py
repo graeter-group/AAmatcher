@@ -11,13 +11,18 @@ warnings.filterwarnings("ignore") # for esp_charge
 FILTER_REF = True # whether to apply the filtering to the reference energies or the qm energies
 
 def make_ds(get_charges, storepath, dspath, openff_charge_flag=False, overwrite=False, allow_radicals=False, n_max=None, collagen=False):
+
+    print("starting...")
+    print("will write to ", storepath)
+
     ds = PDBDataset()
 
     ds = PDBDataset.load_npz(dspath, n_max=n_max)
 
     ff = ForceField("amber99sbildn.xml")
-    if collagen:
-        ff = ForceField("./../../src/PDBData/classical_forcefields/collagen.xml")
+
+    if not collagen:
+        ds.remove_names(patterns=["HYP", "DOP"], upper=True)
 
     ds.parametrize(forcefield=ff, get_charges=get_charges, openff_charge_flag=openff_charge_flag, allow_radicals=allow_radicals, collagen=collagen)
 
@@ -44,17 +49,17 @@ def make_ds(get_charges, storepath, dspath, openff_charge_flag=False, overwrite=
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument("--ds_name", type=str, default=["spice/base"], nargs='+', help="name of the dataset to be loaded. will load from the directory base_path/ds_name default: spice/base")
+    parser.add_argument("--ds_base", type=str, default=str(Path("/hits/fast/mbm/seutelf/data/datasets/PDBDatasets")), help="base path to the dataset, default: /hits/fast/mbm/seutelf/data/datasets/PDBDatasets")
     parser.add_argument("--charge", "-c", type=str, dest="tag", default=["bmk"], nargs="+", help="tag of the charge model to use, see model_from_dict in charge_models.py. If the tag is 'esp_charge', use espaloma_charge to parametrize.\npossible tags: ['bmk', 'avg', 'heavy, 'amber99sbildn', 'esp_charge'] (esp_charge is only for non-radicals!)")
     parser.add_argument("--overwrite", "-o", action="store_true", default=False, help="overwrite existing .npz dataset, default:False")
     parser.add_argument("--noise_level", type=float, default=[None], nargs="+", help="noise level to add to the charges, default:None")
-    parser.add_argument("--ds_base", type=str, default=str(Path("/hits/fast/mbm/seutelf/data/datasets/PDBDatasets")), help="base path to the dataset, default: /hits/fast/mbm/seutelf/data/datasets/PDBDatasets")
-    parser.add_argument("--ds_name", type=str, default=["spice/base"], nargs='+', help="name of the dataset to be loaded. will load from the directory base_path/ds_name default: spice/base")
     parser.add_argument("--storage_dir", "-s", type=str, default=None, help="directory path relative to ds_base. in this folder, the parametrizes datasets are stored, named by the tag and noise_level. if None, this is the parent of ds_name. default: None")
     parser.add_argument("--allow_radicals", "-r", action="store_true", default=False)
 
     parser.add_argument("--n_max", type=int, default=None, help="maximum number of conformations to load from the dataset, default: None")
 
-    parser.add_argument("--collagen", "-col", action="store_true", default=False, help="use collagen the forcefield instead of amber99sbildn")
+    parser.add_argument("--collagen", "-col", action="store_true", default=False, help="use collagen the forcefield instead of amber99sbildn. Will add '_col' to the name. Also remove any molecules with DOP or HYP in the name. default: False")
 
     args = parser.parse_args()
     for ds_name in args.ds_name:

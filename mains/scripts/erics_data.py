@@ -139,11 +139,12 @@ if not do_scatter:
 # p = Path(storepath)/Path("spice/base")
 p = Path(storepath)/Path("AA_scan_nat/base")
 p = Path(storepath)/Path("AA_opt_nat/base")
-p = Path(storepath)/Path("AA_opt_rad/base")
 p = Path(storepath)/Path("AA_scan_rad/base")
+p = Path(storepath)/Path("AA_opt_rad/base")
+p = Path(storepath)/Path("spice/base")
 #%%
 
-ds = PDBDataset.load_npz(p)
+ds = PDBDataset.load_npz(p, n_max=20)
 # ds = PDBDataset.load_npz(p, n_max=20)
 # ds.filter_confs(max_energy=60)
 ds.parametrize(allow_radicals=True, get_charges=model_from_dict(tag="heavy"), collagen=True)

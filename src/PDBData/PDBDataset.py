@@ -23,15 +23,28 @@ class PDBDataset:
     Handles the generation of dgl graphs from PDBMolecules. Stores PDBMolecules in a list.
     Uses an hdf5 file containing the pdbfiles as string and xyz, elements, energies and gradients as numpy arrays to store tha dataset on a hard drive.
     """
-    def __init__(self, mols:List[PDBMolecule]=[])->None:
+    def __init__(self, mols:List[PDBMolecule]=[], info=True)->None:
         self.mols = copy.deepcopy(mols)
-        self.info = True
+        self.info = info # flag whether to print information on certain operations.
 
     def __len__(self)->int:
         return len(self.mols)
 
     def __getitem__(self, idx:int)->dgl.graph:
         return self.mols[idx]
+    
+    def __setitem__(self, idx:int, mol:PDBMolecule)->None:
+        self.mols[idx] = mol
+    
+    def __delitem__(self, idx:int)->None:
+        del self.mols[idx]
+
+    def __iter__(self)->PDBMolecule:
+        return iter(self.mols)
+
+    def __add__(self, other:"PDBDataset")->"PDBDataset":
+        return PDBDataset(mols=self.mols + other.mols, info=self.info and other.info)
+        
 
     def append(self, mol:PDBMolecule)->None:
         """
@@ -291,9 +304,10 @@ class PDBDataset:
         return obj
 
     
-    def remove_names(self, patterns:List[str])->None:
+    def remove_names(self, patterns:List[str], upper=False)->None:
         """
         Removes the molecules with names where one of the patterns occurs.
+        If upper is True, this is case-insensitive.
         """
 
         keep = []
@@ -302,7 +316,12 @@ class PDBDataset:
             valid = True
             if not mol.name is None:
                 for pattern in patterns:
-                    if pattern in mol.name:
+                    name = mol.name
+                    if upper:
+                        pattern = pattern.upper()
+                        name = name.upper()
+
+                    if pattern in name:
                         valid = False
                         break
 
